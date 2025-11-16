@@ -6,10 +6,9 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: registry.digitalocean.com
-  REGISTRY_REPOSITORY: broiler
+  REGISTRY: ghcr.io
+  REGISTRY_REPOSITORY: 3roiler
   IMAGE_NAME: api
-  DO_APP_SPEC: .do/app.yaml
 
 jobs:
   build-and-push-image:
@@ -33,8 +32,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DO_NAME }}
-          password: ${{ secrets.DO_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
