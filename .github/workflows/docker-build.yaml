@@ -7,7 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  REGISTRY_REPOSITORY: 3roiler
   IMAGE_NAME: api
 
 jobs:
@@ -39,7 +38,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.REGISTRY_REPOSITORY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/heads/main') }}
             type=sha,enable=true
