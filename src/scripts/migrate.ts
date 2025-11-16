@@ -13,8 +13,10 @@ export async function run() {
       verbose: true,
       databaseUrl: {
         connectionString: process.env.DATABASE_URL,
-        ssl: process.env.DATABASE_CA_CERT ? { ca: process.env.DATABASE_CA_CERT } : undefined
-      } as any
+        ssl: {
+            rejectUnauthorized: false
+        }
+      }
     });
     console.log(`✅ Migrations ${direction} completed`);
   } catch (err) {

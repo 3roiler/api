@@ -5,7 +5,9 @@ dotenv.config();
 
 const poolConfig: PoolConfig = {
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_CA_CERT ? { ca: process.env.DATABASE_CA_CERT } : undefined
+  ssl: {
+    rejectUnauthorized: false
+  }
 };
 
 export const pool = new Pool(poolConfig);
