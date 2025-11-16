@@ -1,5 +1,8 @@
 #!/bin/sh
 set -e
 
+echo "[entrypoint] Running database migrations..."
+./node_modules/.bin/node-pg-migrate up -m ./migrations --single-transaction
+
 echo "[entrypoint] Starting API server..."
 exec node dist/app.js
