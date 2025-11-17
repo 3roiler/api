@@ -1,0 +1,10 @@
+{
+  "database-url-var": "DATABASE_URL",
+  "migrations-table": "pgmigrations",
+  "dir": "migrations",
+  "log": true,
+  "verbose": true,
+  "migration-file-language": "js",
+  "reject-unauthorized": false,
+  "ssl": true
+}

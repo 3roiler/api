@@ -1,5 +1,3 @@
-/** @type {import('node-pg-migrate').Migration} */
-
 /**
  * @type {import('node-pg-migrate').ColumnDefinitions | undefined}
  */
@@ -13,7 +11,7 @@ export const shorthands = undefined;
 export const up = (pgm) => {
     pgm.createTable('users', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        username: { type: 'nvarchar(50)', notNull: true, unique: true },
+        username: { type: 'varchar(50)', notNull: true, unique: true },
         created_at: { type: 'timestamp', default: pgm.func('current_timestamp'), notNull: true },
         updated_at: { type: 'timestamp', default: pgm.func('current_timestamp'), notNull: true }
     });
@@ -26,6 +24,6 @@ export const up = (pgm) => {
  * @param run {() => void | undefined}
  * @returns {Promise<void> | void}
  */
-export const down = (pgm) => { 
+export const down = (pgm) => {
     pgm.dropTable('users');
 };

@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import userService from '../services/userService';
+import userService from '../services/userService.js';
 
 const router = Router();
 
 /**
- * @route   GET /api/v1/health
+ * @route   GET /health
  * @desc    Health check endpoint
  * @access  Public
  */

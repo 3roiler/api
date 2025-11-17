@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import userService from '../services/userService';
-import { AppError, asyncHandler } from '../middleware/errorHandler';
+import { AppError, asyncHandler } from '../middleware';
 
 export class UserController {
   getAllUsers = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {

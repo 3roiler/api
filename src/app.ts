@@ -2,11 +2,7 @@ import express, { Application, Request, Response } from 'express';
 import dotenv from 'dotenv';
 import config from './config';
 import routes from './routes';
-import { logger } from './middleware/logger';
-import { errorHandler } from './middleware/errorHandler';
-import { notFound } from './middleware/notFound';
-import './config/database';
-
+import { logger, notFound, errorHandler } from './middleware';
 dotenv.config();
 
 const app: Application = express();
