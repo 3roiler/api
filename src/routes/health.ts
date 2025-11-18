@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import userService from '../services/userService.js';
+import pool from '../config/database.js';
 
 const router = Router();
 
@@ -9,18 +9,28 @@ const router = Router();
  * @access  Public
  */
 router.get('/', async (req, res) => {
-  const dbHealthy = await userService.healthCheck();
-  
+  const dbHealthy = await checkDatabase();
+
   const healthStatus = {
     status: dbHealthy ? 'healthy' : 'unhealthy',
     timestamp: new Date().toISOString(),
     service: 'api.broiler.dev',
     database: dbHealthy ? 'connected' : 'disconnected',
-    uptime: process.uptime(),
+    uptime: process.uptime()
   };
 
   const statusCode = dbHealthy ? 200 : 503;
   res.status(statusCode).json(healthStatus);
 });
+
+async function checkDatabase(): Promise<boolean> {
+    try {
+      await pool.query('SELECT 1');
+      return true;
+    } catch (error) {
+      console.error('Database health check failed:', error);
+      return false;
+    }
+  }
 
 export default router;

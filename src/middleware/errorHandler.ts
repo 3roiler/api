@@ -37,7 +37,7 @@ export const errorHandler = (err: Error | AppError, req: Request, res: Response,
 
   return res.status(500).json({
     identifier: 'API_ERROR',
-    message: 'An internal server error occurred.',
+    message: 'An internal server error occurred.'
   });
 };
 

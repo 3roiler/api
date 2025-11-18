@@ -1,6 +1,34 @@
 export interface User {
-  id: number;
+  id: string;
+  githubId: string | null;
   username: string;
-  created_at: Date;
-  updated_at: Date;
+  displayName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  profileUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Group {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Scope {
+  id: string;
+  key: string;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface UserAuthorization {
+  user: User;
+  groups: Group[];
+  scopes: Scope[];
 }

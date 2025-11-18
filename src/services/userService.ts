@@ -1,52 +1,227 @@
-import pool from '../config/database';
-import { User } from '../models';
-import { QueryResult } from 'pg';
+import type { QueryResult } from 'pg';
+import pool from '../config/database.js';
+import type { Group, Scope, User, UserAuthorization } from '../models/index.js';
+import type { GitHubAuthUser } from '../types/auth.js';
+
+const USER_COLUMNS = `
+  id,
+  github_id AS "githubId",
+  username,
+  display_name AS "displayName",
+  email,
+  avatar_url AS "avatarUrl",
+  profile_url AS "profileUrl",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
+export interface CreateUserOptions {
+  username: string;
+  displayName?: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
+  profileUrl?: string | null;
+  githubId?: string | null;
+}
+
+export interface UpdateUserOptions {
+  username?: string;
+  displayName?: string | null;
+  email?: string | null;
+  avatarUrl?: string | null;
+  profileUrl?: string | null;
+}
 
 export class UserService {
   async getAllUsers(): Promise<User[]> {
     const result: QueryResult<User> = await pool.query(
-      'SELECT id, username, created_at, updated_at FROM users ORDER BY created_at DESC'
+      `SELECT ${USER_COLUMNS} FROM users ORDER BY created_at DESC`
     );
     return result.rows;
   }
 
-  async getUserById(id: number): Promise<User | null> {
+  async getUserById(id: string): Promise<User | null> {
     const result: QueryResult<User> = await pool.query(
-      'SELECT id, username, created_at, updated_at FROM users WHERE id = $1',
+      `SELECT ${USER_COLUMNS} FROM users WHERE id = $1`,
       [id]
     );
-    return result.rows[0] || null;
+    return result.rows[0] ?? null;
   }
 
-  async createUser(username: string): Promise<User> {
+  async findByGithubId(githubId: string): Promise<User | null> {
     const result: QueryResult<User> = await pool.query(
-      'INSERT INTO users (username) VALUES ($1) RETURNING id, username, created_at, updated_at',
-      [username]
+      `SELECT ${USER_COLUMNS} FROM users WHERE github_id = $1`,
+      [githubId]
     );
+    return result.rows[0] ?? null;
+  }
+
+  async createUser(options: CreateUserOptions): Promise<User> {
+    const { username, displayName = null, email = null, avatarUrl = null, profileUrl = null, githubId = null } = options;
+
+    const result: QueryResult<User> = await pool.query(
+      `INSERT INTO users (username, display_name, email, avatar_url, profile_url, github_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING ${USER_COLUMNS}`,
+      [username, displayName, email, avatarUrl, profileUrl, githubId]
+    );
+
     return result.rows[0];
   }
 
-  async updateUser(id: number, username: string): Promise<User | null> {
-    const result: QueryResult<User> = await pool.query(
-      'UPDATE users SET username = $1, updated_at = NOW() WHERE id = $2 RETURNING id, username, created_at, updated_at',
-      [username, id]
-    );
-    return result.rows[0] || null;
-  }
+  async updateUser(id: string, updates: UpdateUserOptions): Promise<User | null> {
+    const fields: Array<[string, unknown]> = [
+      ['username', updates.username],
+      ['display_name', updates.displayName],
+      ['email', updates.email],
+      ['avatar_url', updates.avatarUrl],
+      ['profile_url', updates.profileUrl]
+    ];
 
-  async deleteUser(id: number): Promise<boolean> {
-    const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
-    return result.rowCount !== null && result.rowCount > 0;
-  }
+    const setFragments: string[] = [];
+    const values: unknown[] = [];
 
-  async healthCheck(): Promise<boolean> {
-    try {
-      await pool.query('SELECT 1');
-      return true;
-    } catch (error) {
-      console.error('Database health check failed:', error);
-      return false;
+    for (const [column, value] of fields) {
+      if (value !== undefined) {
+        values.push(value);
+        setFragments.push(`${column} = $${values.length}`);
+      }
     }
+
+    if (setFragments.length === 0) {
+      return this.getUserById(id);
+    }
+
+    values.push(id);
+    setFragments.push(`updated_at = NOW()`);
+
+    const result: QueryResult<User> = await pool.query(
+      `UPDATE users
+       SET ${setFragments.join(', ')}
+       WHERE id = $${values.length}
+       RETURNING ${USER_COLUMNS}`,
+      values
+    );
+
+    return result.rows[0] ?? null;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async upsertGitHubUser(authUser: GitHubAuthUser): Promise<User> {
+    const result: QueryResult<User> = await pool.query(
+      `INSERT INTO users (github_id, username, display_name, email, avatar_url, profile_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (github_id) DO UPDATE SET
+         username = EXCLUDED.username,
+         display_name = EXCLUDED.display_name,
+         email = EXCLUDED.email,
+         avatar_url = EXCLUDED.avatar_url,
+         profile_url = EXCLUDED.profile_url,
+         updated_at = NOW()
+       RETURNING ${USER_COLUMNS}`,
+      [
+        authUser.id,
+        authUser.username,
+        authUser.displayName,
+        authUser.email,
+        authUser.avatarUrl,
+        authUser.profileUrl
+      ]
+    );
+
+    return result.rows[0];
+  }
+
+  async getUserAuthorization(userId: string): Promise<UserAuthorization> {
+    const user = await this.getUserById(userId);
+
+    if (!user) {
+      throw new Error(`User with id ${userId} not found.`);
+    }
+
+    const groups = await this.getUserGroups(userId);
+    const scopes = await this.getUserScopes(userId);
+
+    return {
+      user,
+      groups,
+      scopes
+    };
+  }
+  
+  private async getUserGroups(userId: string): Promise<Group[]> {
+    const result: QueryResult<Group> = await pool.query(
+      `WITH RECURSIVE group_tree AS (
+         SELECT g.id,
+                g.slug,
+                g.name,
+                g.description,
+                g.created_at,
+                g.updated_at
+         FROM groups g
+         INNER JOIN user_groups ug ON ug.group_id = g.id
+         WHERE ug.user_id = $1
+
+         UNION
+
+         SELECT parent.id,
+                parent.slug,
+                parent.name,
+                parent.description,
+                parent.created_at,
+                parent.updated_at
+         FROM groups parent
+         INNER JOIN group_dependencies gd ON gd.dependency_group_id = parent.id
+         INNER JOIN group_tree child ON child.id = gd.group_id
+       )
+       SELECT DISTINCT
+         id,
+         slug,
+         name,
+         description,
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
+       FROM group_tree
+       ORDER BY slug ASC`,
+      [userId]
+    );
+
+    return result.rows;
+  }
+
+  private async getUserScopes(userId: string): Promise<Scope[]> {
+    const result: QueryResult<Scope> = await pool.query(
+      `WITH RECURSIVE group_tree AS (
+         SELECT g.id
+         FROM groups g
+         INNER JOIN user_groups ug ON ug.group_id = g.id
+         WHERE ug.user_id = $1
+
+         UNION
+
+         SELECT parent.id
+         FROM groups parent
+         INNER JOIN group_dependencies gd ON gd.dependency_group_id = parent.id
+         INNER JOIN group_tree child ON child.id = gd.group_id
+       )
+       SELECT DISTINCT
+         s.id,
+         s.key,
+         s.description,
+         s.created_at AS "createdAt",
+         s.updated_at AS "updatedAt"
+       FROM group_tree gt
+       INNER JOIN group_scopes gs ON gs.group_id = gt.id
+       INNER JOIN scopes s ON s.id = gs.scope_id
+       ORDER BY s.key ASC`,
+      [userId]
+    );
+
+    return result.rows;
   }
 }
 

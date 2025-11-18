@@ -1,40 +1,40 @@
 import { Router } from 'express';
-import userController from '../controllers/userController';
+import userController from '../controllers/userController.js';
 
 const router = Router();
 
 /**
  * @route   GET /users
  * @desc    Get all users
- * @access  Public
+ * @access  Protected
  */
 router.get('/', userController.getAllUsers);
 
 /**
  * @route   GET /users/:id
  * @desc    Get user by ID
- * @access  Public
+ * @access  Protected
  */
 router.get('/:id', userController.getUserById);
 
 /**
  * @route   POST /users
  * @desc    Create new user
- * @access  Public
+ * @access  Protected
  */
 router.post('/', userController.createUser);
 
 /**
  * @route   PUT /users/:id
  * @desc    Update user
- * @access  Public
+ * @access  Protected
  */
 router.put('/:id', userController.updateUser);
 
 /**
  * @route   DELETE /users/:id
  * @desc    Delete user
- * @access  Public
+ * @access  Protected
  */
 router.delete('/:id', userController.deleteUser);
 
