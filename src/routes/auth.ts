@@ -27,9 +27,16 @@ const startGithubAuthentication: RequestHandler = (req: Request, res: Response, 
     return;
   }
 
+  const redirect = typeof req.query.redirect === 'string' && /^\/[a-zA-Z0-9/_\-?&=.%]*$/.test(req.query.redirect) ? req.query.redirect : undefined;
+
+  const state = redirect
+    ? Buffer.from(JSON.stringify({ r: redirect })).toString('base64url')
+    : undefined;
+
   passport.authenticate('github', {
     scope: config.oauth.github.scope,
-    session: false
+    session: false,
+    state
   })(req, res, next);
 };
 
