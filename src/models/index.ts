@@ -32,3 +32,17 @@ export interface UserAuthorization {
   groups: Group[];
   scopes: Scope[];
 }
+
+export interface RefreshToken {
+  id: string;
+  userId: string;
+  provider: string;
+  tokenHash: string;
+  expiresAt: Date;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: Date;
+  revokedAt: Date | null;
+  replacedByTokenHash: string | null;
+  metadata: Record<string, unknown>;
+}

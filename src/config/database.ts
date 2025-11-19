@@ -11,7 +11,7 @@ const poolConfig: PoolConfig = {
 export const pool = new Pool(poolConfig);
 
 pool.on('error', (err: Error) => {
-  console.error('❌ Unexpected database error:', err);
+  console.error('Unexpected database error:', err);
   process.exit(-1);
 });
 

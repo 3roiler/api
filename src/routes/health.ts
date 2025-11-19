@@ -4,9 +4,19 @@ import pool from '../config/database.js';
 const router = Router();
 
 /**
- * @route   GET /health
- * @desc    Health check endpoint
- * @access  Public
+ * @openapi
+ * /health:
+ *   get:
+ *     summary: Health check
+ *     tags:
+ *       - Health
+ *     responses:
+ *       '200':
+ *         description: Service health information.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthStatus'
  */
 router.get('/', async (req, res) => {
   const dbHealthy = await checkDatabase();

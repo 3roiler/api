@@ -102,6 +102,28 @@ export const up = (pgm) => {
     pgm.createIndex('group_scopes', ['group_id']);
     pgm.createIndex('group_dependencies', ['dependency_group_id']);
     pgm.createIndex('group_dependencies', ['group_id']);
+
+    pgm.createTable('refresh_tokens', {
+        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
+        user_id: {
+            type: 'uuid',
+            notNull: true,
+            references: 'users',
+            onDelete: 'cascade'
+        },
+        provider: { type: 'text', notNull: true },
+        token_hash: { type: 'text', notNull: true },
+        expires_at: { type: 'timestamptz', notNull: true },
+        user_agent: { type: 'text' },
+        ip_address: { type: 'text' },
+        created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
+        revoked_at: { type: 'timestamptz' },
+        replaced_by_token_hash: { type: 'text' },
+        metadata: { type: 'jsonb', default: pgm.func("'{}'::jsonb"), notNull: true }
+    });
+    pgm.addConstraint('refresh_tokens', 'refresh_tokens_token_hash_unique', { unique: ['token_hash'] });
+    pgm.createIndex('refresh_tokens', ['user_id']);
+    pgm.createIndex('refresh_tokens', ['expires_at']);
 };
 
 /**
@@ -110,6 +132,7 @@ export const up = (pgm) => {
  * @returns {Promise<void> | void}
  */
 export const down = (pgm) => {
+    pgm.dropTable('refresh_tokens');
     pgm.dropTable('group_dependencies');
     pgm.dropTable('group_scopes');
     pgm.dropTable('user_groups');

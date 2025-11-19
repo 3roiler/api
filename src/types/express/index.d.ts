@@ -1,5 +1,6 @@
 import { Session, SessionData } from 'express-session';
 import type { JwtPayload } from 'jsonwebtoken';
+import type { OAuthSessionStore } from '../auth';
 
 export interface AuthContext {
   token: string;
@@ -11,5 +12,11 @@ declare module 'express-serve-static-core' {
     session?: Session & Partial<SessionData>;
     allowAnonymous?: boolean;
     auth?: AuthContext;
+  }
+}
+
+declare module 'express-session' {
+  interface SessionData {
+    oauth?: OAuthSessionStore;
   }
 }

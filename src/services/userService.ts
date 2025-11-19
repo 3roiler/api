@@ -1,7 +1,7 @@
-import type { QueryResult } from 'pg';
+import type { PoolClient, QueryResult } from 'pg';
 import pool from '../config/database.js';
-import type { Group, Scope, User, UserAuthorization } from '../models/index.js';
-import type { GitHubAuthUser } from '../types/auth.js';
+import type { Group, Scope, User, UserAuthorization, RefreshToken } from '../models/index.js';
+import type { OAuthAuthenticatedUser } from '../types/auth.js';
 
 const USER_COLUMNS = `
   id,
@@ -13,6 +13,20 @@ const USER_COLUMNS = `
   profile_url AS "profileUrl",
   created_at AS "createdAt",
   updated_at AS "updatedAt"
+`;
+
+const REFRESH_TOKEN_COLUMNS = `
+  id,
+  user_id AS "userId",
+  provider,
+  token_hash AS "tokenHash",
+  expires_at AS "expiresAt",
+  user_agent AS "userAgent",
+  ip_address AS "ipAddress",
+  created_at AS "createdAt",
+  revoked_at AS "revokedAt",
+  replaced_by_token_hash AS "replacedByTokenHash",
+  metadata
 `;
 
 export interface CreateUserOptions {
@@ -30,6 +44,24 @@ export interface UpdateUserOptions {
   email?: string | null;
   avatarUrl?: string | null;
   profileUrl?: string | null;
+}
+
+export interface CreateRefreshTokenOptions {
+  userId: string;
+  provider: string;
+  tokenHash: string;
+  expiresAt: Date;
+  userAgent?: string | null;
+  ipAddress?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RotateRefreshTokenOptions {
+  tokenHash: string;
+  expiresAt: Date;
+  userAgent?: string | null;
+  ipAddress?: string | null;
+  metadata?: Record<string, unknown>;
 }
 
 export class UserService {
@@ -111,7 +143,107 @@ export class UserService {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async upsertGitHubUser(authUser: GitHubAuthUser): Promise<User> {
+  async createRefreshToken(options: CreateRefreshTokenOptions): Promise<RefreshToken> {
+    const metadata = options.metadata ?? {};
+
+    const result: QueryResult<RefreshToken> = await pool.query(
+      `INSERT INTO refresh_tokens (user_id, provider, token_hash, expires_at, user_agent, ip_address, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING ${REFRESH_TOKEN_COLUMNS}`,
+      [
+        options.userId,
+        options.provider,
+        options.tokenHash,
+        options.expiresAt,
+        options.userAgent ?? null,
+        options.ipAddress ?? null,
+        metadata,
+      ]
+    );
+
+    return result.rows[0];
+  }
+
+  async findRefreshTokenByHash(tokenHash: string): Promise<RefreshToken | null> {
+    const result: QueryResult<RefreshToken> = await pool.query(
+      `SELECT ${REFRESH_TOKEN_COLUMNS}
+       FROM refresh_tokens
+       WHERE token_hash = $1`,
+      [tokenHash]
+    );
+
+    return result.rows[0] ?? null;
+  }
+
+  async rotateRefreshToken(
+    existingToken: RefreshToken,
+    replacement: RotateRefreshTokenOptions
+  ): Promise<RefreshToken> {
+    const metadata = replacement.metadata ?? {};
+    const client: PoolClient = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `UPDATE refresh_tokens
+         SET revoked_at = NOW(), replaced_by_token_hash = $1
+         WHERE id = $2`,
+        [replacement.tokenHash, existingToken.id]
+      );
+
+      const inserted = await client.query<RefreshToken>(
+        `INSERT INTO refresh_tokens (user_id, provider, token_hash, expires_at, user_agent, ip_address, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING ${REFRESH_TOKEN_COLUMNS}`,
+        [
+          existingToken.userId,
+          existingToken.provider,
+          replacement.tokenHash,
+          replacement.expiresAt,
+          replacement.userAgent ?? null,
+          replacement.ipAddress ?? null,
+          metadata,
+        ]
+      );
+
+      await client.query('COMMIT');
+      return inserted.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async revokeRefreshTokenByHash(tokenHash: string): Promise<void> {
+    await pool.query(
+      `UPDATE refresh_tokens
+       SET revoked_at = NOW()
+       WHERE token_hash = $1 AND revoked_at IS NULL`,
+      [tokenHash]
+    );
+  }
+
+  async revokeRefreshTokensForUser(userId: string): Promise<void> {
+    await pool.query(
+      `UPDATE refresh_tokens
+       SET revoked_at = NOW()
+       WHERE user_id = $1 AND revoked_at IS NULL`,
+      [userId]
+    );
+  }
+
+  async upsertOAuthUser(authUser: OAuthAuthenticatedUser): Promise<User> {
+    if (authUser.provider === 'github') {
+      return this.upsertGithubUser(authUser);
+    }
+
+    throw new Error(`OAuth provider ${authUser.provider} is not supported.`);
+  }
+
+  private async upsertGithubUser(authUser: OAuthAuthenticatedUser): Promise<User> {
     const result: QueryResult<User> = await pool.query(
       `INSERT INTO users (github_id, username, display_name, email, avatar_url, profile_url)
        VALUES ($1, $2, $3, $4, $5, $6)

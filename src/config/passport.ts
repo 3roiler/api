@@ -2,7 +2,7 @@ import passport from 'passport';
 import { Strategy as GitHubStrategy, Profile as GitHubProfile } from 'passport-github2';
 import type { VerifyCallback } from 'passport-oauth2';
 import config from './index.js';
-import type { GitHubAuthUser } from '../types/auth.js';
+import type { OAuthAuthenticatedUser } from '../types/auth.js';
 
 type GitHubPhoto = NonNullable<GitHubProfile['photos']>[number];
 
@@ -14,16 +14,17 @@ passport.deserializeUser((obj, done) => {
   done(null, obj as Express.User);
 });
 
-const hasGitHubCredentials = Boolean(config.oauth.github.clientId && config.oauth.github.clientSecret);
+const githubProvider = config.oauth.providers.github;
+const hasGitHubCredentials = Boolean(githubProvider?.enabled && githubProvider.clientId && githubProvider.clientSecret);
 
 if (hasGitHubCredentials) {
   passport.use(
     new GitHubStrategy(
       {
-        clientID: config.oauth.github.clientId,
-        clientSecret: config.oauth.github.clientSecret,
-        callbackURL: config.oauth.github.callbackUrl,
-        scope: config.oauth.github.scope,
+        clientID: githubProvider.clientId,
+        clientSecret: githubProvider.clientSecret,
+        callbackURL: githubProvider.callbackUrl,
+        scope: githubProvider.scope,
       },
       (accessToken: string, refreshToken: string, profile: GitHubProfile, done: VerifyCallback) => {
         try {
@@ -44,7 +45,7 @@ if (hasGitHubCredentials) {
           const primaryPhoto = photos.find((photo: GitHubPhoto) => Boolean(photo.value)) || null;
           const snapshot = (profile as { _json?: Record<string, unknown> })._json ?? {};
 
-          const authUser: GitHubAuthUser = {
+          const authUser: OAuthAuthenticatedUser = {
             provider: 'github',
             id: profile.id,
             username: profile.username || profile.displayName || profile.id,

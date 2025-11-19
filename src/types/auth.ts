@@ -1,5 +1,5 @@
-export interface GitHubAuthUser {
-  provider: 'github';
+export interface OAuthAuthenticatedUser {
+  provider: string;
   id: string;
   username: string;
   displayName: string;
@@ -10,3 +10,12 @@ export interface GitHubAuthUser {
   refreshToken: string | null;
   rawProfile: Record<string, unknown>;
 }
+
+export interface OAuthSessionEntry {
+  provider: string;
+  state: string;
+  redirect: string | null;
+  createdAt: number;
+}
+
+export type OAuthSessionStore = Record<string, OAuthSessionEntry | undefined>;

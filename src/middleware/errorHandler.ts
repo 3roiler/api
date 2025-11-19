@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, type RequestHandler } from 'express';
 
 export class AppError extends Error {
   statusCode: number;
@@ -23,9 +23,18 @@ export class AppError extends Error {
   static internal(message: string, identifier: string = 'INTERNAL_SERVER_ERROR') {
     return new AppError(500, identifier, message);
   }
+
+  static serviceUnavailable(message: string, identifier: string = 'SERVICE_UNAVAILABLE') {
+    return new AppError(503, identifier, message);
+  }
 }
 
-export const errorHandler = (err: Error | AppError, req: Request, res: Response, next: NextFunction) => {
+export const errorHandler = (
+  err: Error | AppError,
+  req: Request,
+  res: Response,
+  _next: NextFunction
+) => {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       identifier: err.identifier,
@@ -41,7 +50,7 @@ export const errorHandler = (err: Error | AppError, req: Request, res: Response,
   });
 };
 
-export const asyncHandler = (fn: Function) => {
+export const asyncHandler = (fn: RequestHandler): RequestHandler => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };

@@ -1,48 +1,75 @@
 import { Router } from 'express';
-import type { RequestHandler, Request, Response, NextFunction } from 'express';
+import type { RequestHandler } from 'express';
 import passport from 'passport';
-import config from '../config/index.js';
 import authController from '../controllers/authController.js';
+import { getOAuthProvider, ensureProviderEnabled } from '../services/oauth/providerService.js';
+import { resolveRedirectTarget } from '../services/oauth/redirectService.js';
+import { initializeOAuthSession } from '../services/oauth/stateService.js';
 
 const router = Router();
 
-const isGithubConfigured = (): boolean => Boolean(config.oauth.github.clientId && config.oauth.github.clientSecret);
+const createStartHandler = (providerKey: string): RequestHandler => {
+  return (req, res, next) => {
+    try {
+      const provider = getOAuthProvider(providerKey);
+      ensureProviderEnabled(provider);
 
-const handleGithubCallback: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
-    if (!isGithubConfigured()) {
-        res.status(503).json({ message: 'GitHub OAuth is not configured on the API.' });
-        return;
-    }
+      const redirectTarget = resolveRedirectTarget(req, provider);
+      const state = initializeOAuthSession(req, provider.key, redirectTarget);
 
-    passport.authenticate('github', {
-        failureRedirect: config.oauth.github.failureRedirect || undefined,
+      const authenticator = passport.authenticate(provider.strategyName, {
+        scope: provider.scope,
         session: false,
-    })(req, res, next);
+        state,
+      }) as RequestHandler;
+
+      authenticator(req, res, next);
+    } catch (error) {
+      next(error);
+    }
+  };
 };
 
+const createCallbackHandler = (providerKey: string): RequestHandler => {
+  return (req, res, next) => {
+    try {
+      const provider = getOAuthProvider(providerKey);
+      ensureProviderEnabled(provider);
 
-const startGithubAuthentication: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
-  if (!isGithubConfigured()) {
-    res.status(503).json({ message: 'GitHub OAuth is not configured on the API.' });
-    return;
-  }
+      const authenticator = passport.authenticate(provider.strategyName, {
+        failureRedirect: provider.failureRedirect || undefined,
+        session: false,
+      }) as RequestHandler;
 
-  const redirect = typeof req.query.redirect === 'string' && /^\/[a-zA-Z0-9/_\-?&=.%]*$/.test(req.query.redirect) ? req.query.redirect : undefined;
-
-  const state = redirect
-    ? Buffer.from(JSON.stringify({ r: redirect })).toString('base64url')
-    : undefined;
-
-  passport.authenticate('github', {
-    scope: config.oauth.github.scope,
-    session: false,
-    state
-  })(req, res, next);
+      authenticator(req, res, next);
+    } catch (error) {
+      next(error);
+    }
+  };
 };
 
-router.get('/github', startGithubAuthentication);
-router.get('/github/failure', authController.githubFailure);
-router.get('/github/callback', handleGithubCallback, authController.githubCallback);
+const registerProviderRoutes = (providerKey: string) => {
+  router.get(`/${providerKey}`, createStartHandler(providerKey));
+  router.get(`/${providerKey}/failure`, authController.getOAuthFailureHandler(providerKey));
+  router.get(`/${providerKey}/callback`, createCallbackHandler(providerKey), authController.getOAuthCallbackHandler(providerKey));
+};
+
+/**
+ * @openapi
+ * /auth/logout:
+ *   post:
+ *     summary: Invalidate the current session tokens
+ *     tags:
+ *       - Authentication
+ *     security:
+ *       - bearerAuth: []
+ *       - cookieAuth: []
+ *     responses:
+ *       '204':
+ *         description: Session terminated.
+ */
 router.post('/logout', authController.logout);
+
+registerProviderRoutes('github');
 
 export default router;
