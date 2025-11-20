@@ -32,7 +32,7 @@ db-logs: ## PostgreSQL Logs anzeigen
 	docker compose logs -f postgres
 
 db-shell: ## PostgreSQL Shell öffnen
-	docker compose exec postgres psql -U postgres -d gateway_db
+	docker compose exec postgres psql -U postgres -d api_db
 
 db-reset: ## Datenbank zurücksetzen (VORSICHT: Löscht alle Daten!)
 	docker compose down -v
