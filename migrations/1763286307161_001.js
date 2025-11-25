@@ -42,16 +42,16 @@ export const up = (pgm) => {
         display_name: { type: 'varchar(100)', match: '^[a-z0-9][a-z0-9.-]{2,98}[a-z0-9]$/i' },
         email: { type: 'varchar(254)', match: '/[a-z0-9._%+-]+@[a-z0-9-]+.+.[a-z]{2,4}/igm' },
         created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
-        updated_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+        updated_at: { type: 'timestamptz' }
     });
 
     pgm.createTable('group', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        based_on: { type: 'uuid', notNull: false, references: 'group', onDelete: 'SET NULL' },
+        based_on: { type: 'uuid', references: 'group', onDelete: 'SET NULL' },
         key: { type: 'varchar(40)', notNull: true, unique: true, match: '^[a-z0-9][a-z0-9-]{2,38}[a-z0-9]$/i' },
         display_name: { type: 'varchar(100)', notNull: true, match: '^[a-z0-9][a-z0-9.-]{2,98}[a-z0-9]$/i' },
         created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
-        updated_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+        updated_at: { type: 'timestamptz' }
     });
 
     pgm.createTable('user_group', {

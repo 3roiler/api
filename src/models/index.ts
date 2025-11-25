@@ -1,48 +1,53 @@
+import { UUID } from "crypto";
+
 export interface User {
-  id: string;
-  githubId: string | null;
-  username: string;
+  id: UUID;
+  githubRef: string | null;
+  name: string;
   displayName: string | null;
   email: string | null;
-  avatarUrl: string | null;
-  profileUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface Group {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Scope {
-  id: string;
+  id: UUID;
+  basedOn: UUID | null;
   key: string;
-  description: string | null;
+  displayName: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface UserAuthorization {
-  user: User;
-  groups: Group[];
-  scopes: Scope[];
+export interface UserGroup {
+  userId: string;
+  groupId: string;
+  createdAt: Date;
+}
+
+export interface UserPermission {
+  id: UUID;
+  userId: UUID;
+  permission: string;
+  grantedAt: Date;
+}
+
+export interface GroupPermission {
+  id: UUID;
+  groupId: UUID;
+  permission: string;
+  grantedAt: Date;
 }
 
 export interface RefreshToken {
   id: string;
-  userId: string;
+  userId: UUID;
   provider: string;
-  tokenHash: string;
+  hash: string;
   expiresAt: Date;
-  userAgent: string | null;
+  agent: string | null;
   ipAddress: string | null;
   createdAt: Date;
   revokedAt: Date | null;
-  replacedByTokenHash: string | null;
   metadata: Record<string, unknown>;
 }
