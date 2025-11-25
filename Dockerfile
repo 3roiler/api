@@ -13,6 +13,8 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV HOST=localhost
+ENV PORT=3000
 ENV API_PREFIX=/api
 
 COPY package.json package-lock.json* ./
@@ -29,9 +31,9 @@ RUN mkdir -p /app/.certs && \
 
 USER nodeusr
 
-EXPOSE 3000
+EXPOSE ${PORT}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e 'require("http").get({host:"localhost",port:3000,path:"${API_PREFIX}/health"},r=>{if(r.statusCode!==200)process.exit(1);}).on("error",()=>process.exit(1))'
+  CMD node -e 'require("http").get({host:"${HOST}",port:${PORT},path:"${API_PREFIX}/health"},r=>{if(r.statusCode!==200)process.exit(1);}).on("error",()=>process.exit(1))'
 
 CMD ["./docker-entrypoint.sh"]

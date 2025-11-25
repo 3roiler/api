@@ -1,52 +1,20 @@
-.PHONY: help install dev build start clean db-up db-down db-restart migrate-up migrate-down migrate-create logs test
+.PHONY: help pg-start pg-stop pg-logs pg-shell migrate-up migrate-down migrate-create build run start stop
 
 help: ## Zeigt diese Hilfe an
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-install: ## Dependencies installieren
-	npm install
+# Postgres
+pg-start: ## PostgreSQL und pgAdmin starten
+	docker compose up -d postgres pgadmin
 
-dev: ## Dev-Server starten (Hot-Reload)
-	npm run dev
+pg-stop: ## PostgreSQL und pgAdmin stoppen
+	docker compose down postgres pgadmin
 
-build: ## TypeScript kompilieren
-	npm run build
-
-start: ## Production Server starten
-	npm start
-
-clean: ## Build-Artefakte löschen
-	rm -rf dist node_modules
-
-# Docker Compose Befehle
-db-up: ## PostgreSQL Container starten
-	docker compose up -d postgres
-
-db-down: ## PostgreSQL Container stoppen
-	docker compose down
-
-db-restart: ## PostgreSQL Container neu starten
-	docker compose restart postgres
-
-db-logs: ## PostgreSQL Logs anzeigen
+pg-logs: ## PostgreSQL Logs anzeigen
 	docker compose logs -f postgres
 
-db-shell: ## PostgreSQL Shell öffnen
+pg-shell: ## PostgreSQL Shell öffnen
 	docker compose exec postgres psql -U postgres -d api_db
-
-db-reset: ## Datenbank zurücksetzen (VORSICHT: Löscht alle Daten!)
-	docker compose down -v
-	docker compose up -d postgres
-	sleep 5
-	npm run migrate:up
-
-# pgAdmin
-pgadmin-up: ## pgAdmin Container starten
-	docker compose up -d pgadmin
-
-pgadmin-down: ## pgAdmin Container stoppen
-	docker compose stop pgadmin
-
 # Migrations
 migrate-up: ## Alle ausstehenden Migrationen ausführen
 	npm run migrate:up
@@ -57,8 +25,22 @@ migrate-down: ## Letzte Migration zurückrollen
 migrate-create: ## Neue Migration erstellen (usage: make migrate-create name=add_products)
 	npm run migrate:create -- $(name)
 
-# Full Stack
-start-all: db-up pgadmin-up migrate-up dev ## Startet PostgreSQL, pgAdmin, führt Migrationen aus und startet API
+# Node.js Befehle
+compile: ## TypeScript kompilieren
+	npm run build
 
-stop-all: ## Stoppt alle Services
+# Docker Compose Befehle
+build: ## Docker Images bauen 
+	docker compose build
+
+run: ## Server mit Docker Compose starten (terminal gebunden)
+	docker compose up postgres -d
+	make migrate-up
+	docker compose up
+
+start: ## Server mit Docker Compose im Hintergrund starten
+	docker compose up -d
+	make migrate-up
+
+stop: ## Server stoppen
 	docker compose down
