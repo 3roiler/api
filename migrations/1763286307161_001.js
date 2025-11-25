@@ -11,119 +11,111 @@ export const shorthands = undefined;
 export const up = (pgm) => {
     pgm.createExtension('pgcrypto', { ifNotExists: true });
 
-    pgm.createTable('users', {
-        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        github_id: { type: 'text', unique: true },
-        username: { type: 'varchar(150)', notNull: true, unique: true },
-        display_name: { type: 'varchar(150)' },
-        email: { type: 'varchar(320)' },
-        avatar_url: { type: 'text' },
-        profile_url: { type: 'text' },
-        created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
-        updated_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+    pgm.createDomain('token_hash', 'text', {
+        constraints: [
+            'CHECK (VALUE ~ \'^[a-f0-9]{64}$\')'
+        ]
     });
 
-    pgm.createTable('groups', {
+    pgm.createFunction(
+        'generate_token_hash',
+        [],
+        {
+            returns: 'token_hash',
+            language: 'plpgsql'
+        },
+        `
+    DECLARE
+        token TEXT := encode(gen_random_bytes(48), 'hex');
+        token_hash TEXT;
+    BEGIN
+        token_hash := encode(digest(token, 'sha256'), 'hex');
+        RETURN token_hash;
+    END;
+    `
+    );
+
+    pgm.createTable('user', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        slug: { type: 'varchar(120)', notNull: true, unique: true },
-        name: { type: 'varchar(150)', notNull: true },
-        description: { type: 'text' },
+        github_ref: { type: 'text', unique: true, notNull: true },
+        name: { type: 'varchar(40)', notNull: true, match: '^[a-z0-9][a-z0-9.-]{2,38}[a-z0-9]$/i' },
+        display_name: { type: 'varchar(100)', match: '^[a-z0-9][a-z0-9.-]{2,98}[a-z0-9]$/i' },
+        email: { type: 'varchar(254)', match: '/[a-z0-9._%+-]+@[a-z0-9-]+.+.[a-z]{2,4}/igm' },
         created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
-        updated_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+        updated_at: { type: 'timestamptz' }
     });
 
-    pgm.createTable('scopes', {
+    pgm.createTable('group', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        key: { type: 'varchar(150)', notNull: true, unique: true },
-        description: { type: 'text' },
+        based_on: { type: 'uuid', references: 'group', onDelete: 'SET NULL' },
+        key: { type: 'varchar(40)', notNull: true, unique: true, match: '^[a-z0-9][a-z0-9-]{2,38}[a-z0-9]$/i' },
+        display_name: { type: 'varchar(100)', notNull: true, match: '^[a-z0-9][a-z0-9.-]{2,98}[a-z0-9]$/i' },
         created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
-        updated_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+        updated_at: { type: 'timestamptz' }
     });
 
-    pgm.createTable('user_groups', {
+    pgm.createTable('user_group', {
+        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
         user_id: {
             type: 'uuid',
             notNull: true,
-            references: 'users',
-            onDelete: 'cascade'
+            references: 'user',
+            onDelete: 'CASCADE',
+            onUpdate: 'CASCADE'
         },
         group_id: {
             type: 'uuid',
             notNull: true,
-            references: 'groups',
-            onDelete: 'cascade'
+            references: 'group',
+            onDelete: 'CASCADE',
+            onUpdate: 'CASCADE'
         },
         assigned_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
     });
-    pgm.addConstraint('user_groups', 'user_groups_pkey', { primaryKey: ['user_id', 'group_id'] });
 
-    pgm.createTable('group_scopes', {
-        group_id: {
-            type: 'uuid',
-            notNull: true,
-            references: 'groups',
-            onDelete: 'cascade'
-        },
-        scope_id: {
-            type: 'uuid',
-            notNull: true,
-            references: 'scopes',
-            onDelete: 'cascade'
-        },
-        granted_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
-    });
-    pgm.addConstraint('group_scopes', 'group_scopes_pkey', { primaryKey: ['group_id', 'scope_id'] });
-
-    pgm.createTable('group_dependencies', {
-        group_id: {
-            type: 'uuid',
-            notNull: true,
-            references: 'groups',
-            onDelete: 'cascade'
-        },
-        dependency_group_id: {
-            type: 'uuid',
-            notNull: true,
-            references: 'groups',
-            onDelete: 'cascade'
-        },
-        created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
-    });
-    pgm.addConstraint('group_dependencies', 'group_dependencies_primary', {
-        primaryKey: ['group_id', 'dependency_group_id']
-    });
-    pgm.addConstraint('group_dependencies', 'group_dependencies_no_self_reference', {
-        check: 'group_id <> dependency_group_id'
-    });
-
-    pgm.createIndex('user_groups', ['group_id']);
-    pgm.createIndex('user_groups', ['user_id']);
-    pgm.createIndex('group_scopes', ['scope_id']);
-    pgm.createIndex('group_scopes', ['group_id']);
-    pgm.createIndex('group_dependencies', ['dependency_group_id']);
-    pgm.createIndex('group_dependencies', ['group_id']);
-
-    pgm.createTable('refresh_tokens', {
+    pgm.createTable('user_permission', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
         user_id: {
             type: 'uuid',
             notNull: true,
-            references: 'users',
-            onDelete: 'cascade'
+            references: 'user',
+            onDelete: 'CASCADE',
+            onUpdate: 'CASCADE'
+        },
+        permission: { type: 'text', notNull: true },
+        granted_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+    });
+
+    pgm.createTable('group_permission', {
+        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
+        group_id: {
+            type: 'uuid',
+            notNull: true,
+            references: 'group',
+            onDelete: 'CASCADE',
+            onUpdate: 'CASCADE'
+        },
+        permission: { type: 'text', notNull: true },
+        granted_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
+    }); 
+
+    pgm.createTable('refresh_token', {
+        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
+        user_id: {
+            type: 'uuid',
+            notNull: true,
+            references: 'user',
+            onDelete: 'CASCADE'
         },
         provider: { type: 'text', notNull: true },
-        token_hash: { type: 'text', notNull: true },
+        hash: { type: 'token_hash', default: pgm.func('generate_token_hash()'), notNull: true },
         expires_at: { type: 'timestamptz', notNull: true },
-        user_agent: { type: 'text' },
+        agent: { type: 'text' },
         ip_address: { type: 'text' },
         created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
         revoked_at: { type: 'timestamptz' },
-        replaced_by_token_hash: { type: 'text' },
         metadata: { type: 'jsonb', default: pgm.func("'{}'::jsonb"), notNull: true }
     });
-    pgm.addConstraint('refresh_tokens', 'refresh_tokens_token_hash_unique', { unique: ['token_hash'] });
-    pgm.createIndex('refresh_tokens', ['user_id']);
-    pgm.createIndex('refresh_tokens', ['expires_at']);
 };
 
 /**
@@ -132,11 +124,12 @@ export const up = (pgm) => {
  * @returns {Promise<void> | void}
  */
 export const down = (pgm) => {
-    pgm.dropTable('refresh_tokens');
-    pgm.dropTable('group_dependencies');
-    pgm.dropTable('group_scopes');
-    pgm.dropTable('user_groups');
-    pgm.dropTable('scopes');
-    pgm.dropTable('groups');
-    pgm.dropTable('users');
+    pgm.dropTable('refresh_token');
+    pgm.dropTable('user_group');
+    pgm.dropTable('user_permission');
+    pgm.dropTable('group_permission');
+    pgm.dropTable('group');
+    pgm.dropTable('user');
+    pgm.dropFunction('generate_token_hash');
+    pgm.dropDomain('token_hash');
 };

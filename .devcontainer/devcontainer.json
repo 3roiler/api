@@ -16,7 +16,10 @@
                 "ckolkman.vscode-postgres",
                 "christian-kohler.npm-intellisense",
                 "SonarSource.sonarlint-vscode",
-                "DavidAnson.vscode-markdownlint"
+                "DavidAnson.vscode-markdownlint",
+                "Gruntfuggly.todo-tree",
+                "redhat.vscode-yaml",
+                "ms-vscode.makefile-tools"
             ]
         }
     },
