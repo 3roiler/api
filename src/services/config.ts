@@ -8,6 +8,7 @@ const port = Number.parseInt(process.env.PORT || '3000', 10);
 const prefix = process.env.API_PREFIX || '/api';
 const url = process.env.API_URL || `http://localhost:${port}`;
 const databaseUrl = process.env.DATABASE_URL || '';
+const redisUrl = process.env.REDIS_URL || '';
 const contact = process.env.CONTACT_EMAIL || '';
 
 // CONSIDERATION generic oauth config --> hardcode for now, because github is enough
@@ -28,6 +29,7 @@ export const config = {
   prefix,
   url,
   databaseUrl,
+  redisUrl,
   contact,
   providers
 };

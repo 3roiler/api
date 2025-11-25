@@ -1,5 +1,5 @@
 import type { QueryResult } from 'pg';
-import { pool } from './persistence';
+import persistence from './persistence';
 import type { User } from '../models/index.js';
 
 const USER_COLUMNS = `
@@ -26,7 +26,7 @@ export interface UpdateUserOptions {
 
 export class UserService {
   async getAllUsers(): Promise<User[]> {
-    const result: QueryResult<User> = await pool.query(
+    const result: QueryResult<User> = await persistence.database.query(
       `SELECT ${USER_COLUMNS} FROM user ORDER BY created_at DESC`
     );
 
@@ -34,7 +34,7 @@ export class UserService {
   }
 
   async getUserById(id: string): Promise<User | null> {
-    const result: QueryResult<User> = await pool.query(
+    const result: QueryResult<User> = await persistence.database.query(
       `SELECT ${USER_COLUMNS} FROM user WHERE id = $1`,
       [id]
     );
@@ -43,7 +43,7 @@ export class UserService {
   }
 
   async findByGithubId(githubRef: string): Promise<User | null> {
-    const result: QueryResult<User> = await pool.query(
+    const result: QueryResult<User> = await persistence.database.query(
       `SELECT ${USER_COLUMNS} FROM user WHERE github_ref = $1`,
       [githubRef]
     );
@@ -53,7 +53,7 @@ export class UserService {
   async createUser(options: CreateUserOptions): Promise<User> {
     const { name, displayName = null, email = null } = options;
 
-    const result: QueryResult<User> = await pool.query(
+    const result: QueryResult<User> = await persistence.database.query(
       `INSERT INTO user (name, display_name, email)
        VALUES ($1, $2, $3)
        RETURNING ${USER_COLUMNS}`,
@@ -87,7 +87,7 @@ export class UserService {
     values.push(id);
     setFragments.push(`updated_at = NOW()`);
 
-    const result: QueryResult<User> = await pool.query(
+    const result: QueryResult<User> = await persistence.database.query(
       `UPDATE user
        SET ${setFragments.join(', ')}
        WHERE id = $${values.length}
@@ -99,7 +99,7 @@ export class UserService {
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    const result = await pool.query('DELETE FROM user WHERE id = $1', [id]);
+    const result = await persistence.database.query('DELETE FROM user WHERE id = $1', [id]);
     return (result.rowCount ?? 0) > 0;
   }  
 }

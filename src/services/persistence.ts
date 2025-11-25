@@ -1,21 +1,37 @@
 import { Pool } from 'pg';
+import { createClient } from 'redis';
 import config from './config';
 
-export const pool = new Pool({
-    connectionString: config.databaseUrl
-});
-
-pool.on('error', (err: Error) => {
-  console.error('Unexpected database error:', err);
-  process.exit(-1);
-});
-
-process.on('SIGINT', async () => {
-  const millis = new Date().getTime();
-  console.log('SIGINT received: closing...');
-  await pool.end();
-  console.log('Database connection pool closed. Took ', new Date().getTime() - millis, 'ms');
+async function onError() {
+  const millis = Date.now();
+  await cache.quit();
+  await database.end();
+  console.log('Database connection pool closed. Took ', Date.now() - millis, 'ms');
   process.exit(0);
+}
+
+const database = new Pool({
+  connectionString: config.databaseUrl
 });
 
-export default { pool };
+const cache = createClient({
+  url: config.redisUrl
+})
+  .on("error", async (err) => {
+    console.error("Cache error", err);
+    await onError();
+  });
+
+cache.connect().catch(async (err) => {
+  console.error("Cache connection error", err);
+  await onError();
+});
+
+database.on('error', async (err: Error) => {
+  console.error('Database error', err);
+  await onError();
+});
+
+process.on('SIGINT', onError);
+
+export default { database, cache };

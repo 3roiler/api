@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, type RequestHandler } from 'express';
 import { AppError } from './error.js';
-import { pool } from './persistence.js';
+import persistence from './persistence.js';
 import config from './config.js';
 
 const asyncHandler = (fn: RequestHandler): RequestHandler => {
@@ -32,7 +32,7 @@ const errorHandler = (
 
 async function checkDatabase(): Promise<boolean> {
     try {
-        await pool.query('SELECT 1');
+        await persistence.database.query('SELECT 1');
         return true;
     } catch (error) {
         console.error('Database health check failed:', error);
@@ -40,11 +40,22 @@ async function checkDatabase(): Promise<boolean> {
     }
 }
 
+async function checkCache(): Promise<boolean> {
+    try {
+        await persistence.cache.ping();
+        return true;
+    } catch (error) {
+        console.error('Cache health check failed:', error);
+        return false;
+    }
+}
+
 async function getHealthState() {
     const dbHealthy = await checkDatabase();
+    const cacheHealthy = await checkCache();
 
     return {
-        ready: dbHealthy,
+        ready: dbHealthy && cacheHealthy,
         timestamp: new Date().toISOString(),
         service: config.url + config.prefix,
         uptime: process.uptime(),
