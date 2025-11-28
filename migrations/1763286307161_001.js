@@ -37,7 +37,7 @@ export const up = (pgm) => {
 
     pgm.createTable('user', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        github_ref: { type: 'text', unique: true, notNull: true },
+        github_id: { type: 'varchar(255)', unique: true },
         name: { type: 'varchar(40)', notNull: true, match: '^[a-z0-9][a-z0-9.-]{2,38}[a-z0-9]$/i' },
         display_name: { type: 'varchar(100)', match: '^[a-z0-9][a-z0-9.-]{2,98}[a-z0-9]$/i' },
         email: { type: 'varchar(254)', match: '/[a-z0-9._%+-]+@[a-z0-9-]+.+.[a-z]{2,4}/igm' },
@@ -86,6 +86,21 @@ export const up = (pgm) => {
         granted_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true }
     });
 
+    pgm.createTable('user_login', {
+        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
+        user_id: {
+            type: 'uuid',
+            notNull: true,
+            references: 'user',
+            onDelete: 'CASCADE',
+            onUpdate: 'CASCADE'
+        },
+        username: { type: 'text', notNull: true },
+        password: { type: 'text', notNull: true },
+        created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
+        last_used_at: { type: 'timestamptz' }
+    });
+
     pgm.createTable('group_permission', {
         id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
         group_id: {
@@ -127,6 +142,7 @@ export const down = (pgm) => {
     pgm.dropTable('refresh_token');
     pgm.dropTable('user_group');
     pgm.dropTable('user_permission');
+    pgm.dropTable('user_login');
     pgm.dropTable('group_permission');
     pgm.dropTable('group');
     pgm.dropTable('user');

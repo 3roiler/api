@@ -12,25 +12,35 @@ export class AppError extends Error {
 }
 
 function badRequest(message: string, identifier: string = 'BAD_REQUEST') {
-    return new AppError(400, identifier, message);
-  }
+  return new AppError(400, identifier, message);
+}
 
 function notFound(message: string, identifier: string = 'NOT_FOUND') {
-    return new AppError(404, identifier, message);
-  }
+  return new AppError(404, identifier, message);
+}
+
+function conflict(message: string, identifier: string = 'CONFLICT') {
+  return new AppError(409, identifier, message);
+}
 
 function internal(message: string, identifier: string = 'INTERNAL_SERVER_ERROR') {
-    return new AppError(500, identifier, message);
-  }
+  return new AppError(500, identifier, message);
+}
 
 function serviceUnavailable(message: string, identifier: string = 'SERVICE_UNAVAILABLE') {
-    return new AppError(503, identifier, message);
-  }
+  return new AppError(503, identifier, message);
+}
+
+function unauthorized(message: string, identifier: string = 'UNAUTHORIZED') {
+  return new AppError(401, identifier, message);
+}
 
 export default {
   AppError,
   badRequest,
   notFound,
+  conflict,
   internal,
-  serviceUnavailable
+  serviceUnavailable,
+  unauthorized
 };

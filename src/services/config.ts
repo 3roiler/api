@@ -10,13 +10,28 @@ const url = process.env.API_URL || `http://localhost:${port}`;
 const databaseUrl = process.env.DATABASE_URL || '';
 const redisUrl = process.env.REDIS_URL || '';
 const contact = process.env.CONTACT_EMAIL || '';
+const corsOrigin = process.env.CORS_ORIGIN || '*';
+
+const jwtSecret = process.env.JWT_SECRET || (() => {
+  const length = 256;
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+
+  const buf = new Uint32Array(length);
+  crypto.getRandomValues(buf);
+  for (let i = 0; i < buf.length; i++) { 
+    s += chars[buf[i] % chars.length]; 
+  }
+
+  return s;
+})();
+
+const jwtExpire = Number(process.env.JWT_EXPIRE) || 24 * 60 * 60 * 1000; // 24 hours
 
 // CONSIDERATION generic oauth config --> hardcode for now, because github is enough
 const github = {
   clientId: process.env.GITHUB_CLIENT_ID || '',
-  clientSecret: process.env.GITHUB_CLIENT_SECRET || '',
-  callbackUrl: process.env.GITHUB_CALLBACK_URL || '',
-  scope: process.env.GITHUB_SCOPE?.split(',').map(s => s.trim()) || ['user:email']
+  clientSecret: process.env.GITHUB_CLIENT_SECRET || ''
 };
 
 const providers = {
@@ -31,7 +46,10 @@ export const config = {
   databaseUrl,
   redisUrl,
   contact,
-  providers
+  jwtSecret,
+  jwtExpire,
+  providers,
+  corsOrigin
 };
 
 export default config;

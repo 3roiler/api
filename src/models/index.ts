@@ -2,7 +2,6 @@ import { UUID } from "crypto";
 
 export interface User {
   id: UUID;
-  githubRef: string | null;
   name: string;
   displayName: string | null;
   email: string | null;
@@ -30,6 +29,15 @@ export interface UserPermission {
   userId: UUID;
   permission: string;
   grantedAt: Date;
+}
+
+export interface UserLogin {
+  id: string;
+  userId: UUID;
+  username: string;
+  password: string;
+  createdAt: Date;
+  lastUsedAt: Date | null;
 }
 
 export interface GroupPermission {

@@ -54,23 +54,37 @@ import { system, user, error } from '../services';
       return next(error.notFound('User not found'));
     }
 
-    res.status(204).send();
+    return res.status(204);
+  });
+
+  const nukeMePlease = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    if(!req.userId){
+      return next(error.unauthorized('No authenticated user.'));
+    }
+
+    console.info(`User ${req.userId} requested nukeMePlease lol`);
+    await user.deleteUser(req.userId);
+    return res.status(204);
   });
 
   const getMe = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    
-    const data = await user.getUserById('');
+    if(!req.userId){
+      return next(error.unauthorized('No authenticated user.'));
+    }
+
+    const data = await user.getUserById(req.userId);
 
     if (!data) {
       return next(error.notFound('Authenticated user not found.'));
     }
 
-    res.status(200).json(user);
+    return res.status(200).json(data);
   });
 
 export default {
   getAllUsers,
   getUserById,
+  nukeMePlease,
   createUser,
   updateUser,
   deleteUser,
