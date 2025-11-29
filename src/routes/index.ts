@@ -30,6 +30,7 @@ router.post("/auth/github", async (req, res, next) => {
   try {
     var token = await auth.exchangeGithub(code, state, config.providers.github.clientId, config.providers.github.clientSecret, redirectUri);
   } catch (err) {
+    console.error('Error exchanging code for access token:', err);
     return next(AppError.unauthorized('Failed to exchange code for access token.'));
   }
 
