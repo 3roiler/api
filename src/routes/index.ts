@@ -70,7 +70,7 @@ router.post("/auth/github", async (req, res, next) => {
 
   return res.cookie('access_token', jwtToken, {
     httpOnly: true,
-    secure: true,
+    secure: config.isProduction,
     sameSite: 'lax',
     domain: config.url.replace(/^https?:\/\//, '').split(':')[0],
     maxAge: config.jwtExpire,
@@ -79,14 +79,13 @@ router.post("/auth/github", async (req, res, next) => {
 });
 
 router.post('/auth/github/logout', async (req, res) => {
-  return res.clearCookie('access_token', {
-    httpOnly: true,
-    secure: true,
+  return res.status(200).clearCookie('access_token', { 
+    httpOnly: true, 
+    secure: config.isProduction, 
     sameSite: 'lax',
     domain: config.url.replace(/^https?:\/\//, '').split(':')[0],
-    maxAge: config.jwtExpire,
     path: config.prefix
-  });
+  }).send();
 });
 
 async function getGithubUserInfo(accessToken: string) {
