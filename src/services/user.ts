@@ -54,6 +54,25 @@ export class UserService {
     return result.rows[0] ?? null;
   }
 
+  async getPermissions(id: string) : Promise<string[]> {
+    const result: QueryResult<{ permission: string }> = await persistence.database.query(
+      `SELECT up.permission
+       FROM public."user_permission" up
+       WHERE up.user_id = $1`,
+      [id]
+    );
+
+    const resultGroup: QueryResult<{ permission: string }> = await persistence.database.query(
+      `SELECT gp.permission
+       FROM public."user_group" ug
+       JOIN public."group_permission" gp ON ug.group_id = gp.group_id
+       WHERE ug.user_id = $1`,
+      [id]
+    );
+
+    return result.rows.map(row => row.permission).concat(resultGroup.rows.map(row => row.permission));
+  }
+
   async authenticate(username: string, password: string): Promise<User | null> {
     const result: QueryResult<{ user_id: string }> = await persistence.database.query(
       `SELECT ul.user_id

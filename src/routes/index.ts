@@ -64,7 +64,8 @@ router.post("/auth/github", async (req, res, next) => {
 
   var jwtToken = await auth.generateToken({
     sub: existingUser.id,
-    name: existingUser.name
+    name: existingUser.name,
+    permissions: await userService.getPermissions(existingUser.id)
   }, config.jwtSecret);
 
   return res.cookie('access_token', jwtToken, {
@@ -75,6 +76,17 @@ router.post("/auth/github", async (req, res, next) => {
     maxAge: config.jwtExpire,
     path: config.prefix
   }).status(200).json(existingUser);
+});
+
+router.post('/auth/github/logout', async (req, res) => {
+  return res.clearCookie('access_token', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    domain: config.url.replace(/^https?:\/\//, '').split(':')[0],
+    maxAge: config.jwtExpire,
+    path: config.prefix
+  });
 });
 
 async function getGithubUserInfo(accessToken: string) {

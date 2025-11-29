@@ -14,12 +14,6 @@ declare global {
   }
 }
 
-const asyncHandler = (fn: RequestHandler): RequestHandler => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-};
-
 const authHandler = async (req: Request, res: Response, next: NextFunction) => {
   var authHeader = req.headers['authorization'];
   var type;
@@ -205,7 +199,6 @@ async function getHealthState() {
 }
 
 export default {
-  asyncHandler,
   errorHandler,
   authHandler,
   registerHandler,

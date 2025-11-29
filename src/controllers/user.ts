@@ -1,85 +1,93 @@
 import { Request, Response, NextFunction } from 'express';
-import { system, user, error } from '../services';
+import { user, error } from '../services';
 
-   const getAllUsers = system.asyncHandler(async (req: Request, res: Response) => {
-    const users = await user.getAllUsers();
-    res.status(200).json(users);
-  });
+const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
+  var requesterId = req.userId;
 
-  const getUserById = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.params;
+  if(!requesterId){
+    return next(error.unauthorized('No authenticated user.'));
+  }else{
+    const requester = await user.getUserById(requesterId);
+  }
 
-    const data = await user.getUserById(id);
+  const users = await user.getAllUsers();
+  return res.status(200).json(users);
+};
 
-    if (!data) {
-      return next(error.notFound('User not found'));
-    }
+const getUserById = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
 
-    res.status(200).json(data);
-  });
+  const data = await user.getUserById(id);
 
-  const createUser = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    const options = req.body;
+  if (!data) {
+    return next(error.notFound('User not found'));
+  }
 
-    if (!options.name) {
-      return next(error.badRequest('Name is required.'));
-    }
+  return res.status(200).json(data);
+};
 
-    const data = await user.createUser(options);
-    res.status(201).json(data);
-  });
+const createUser = async (req: Request, res: Response, next: NextFunction) => {
+  const options = req.body;
 
-  const updateUser = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.params;
-    const options = req.body;
+  if (!options.name) {
+    return next(error.badRequest('Name is required'));
+  }
 
-    if (!options.name && options.displayName === undefined && options.email === undefined) {
-      return next(error.badRequest('At least one field (name, displayName, email) must be provided.'));
-    }
+  const data = await user.createUser(options);
+  return res.status(201).json(data);
+};
 
-    const data = await user.updateUser(id, options);
+const updateUser = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  const options = req.body;
 
-    if (!data) {
-      return next(error.notFound('User not found'));
-    }
+  if (!options.name && options.displayName === undefined && options.email === undefined) {
+    return next(error.badRequest('At least one field (name, displayName, email) must be provided'));
+  }
 
-    res.status(200).json(data);
-  });
+  const data = await user.updateUser(id, options);
 
-  const deleteUser = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.params;
-    const deleted = await user.deleteUser(id);
-    
-    if (!deleted) {
-      return next(error.notFound('User not found'));
-    }
+  if (!data) {
+    return next(error.notFound('User not found'));
+  }
 
-    return res.status(204);
-  });
+  return res.status(200).json(data);
+};
 
-  const nukeMePlease = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    if(!req.userId){
-      return next(error.unauthorized('No authenticated user.'));
-    }
+const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  const deleted = await user.deleteUser(id);
 
-    console.info(`User ${req.userId} requested nukeMePlease lol`);
-    await user.deleteUser(req.userId);
-    return res.status(204);
-  });
+  if (!deleted) {
+    return next(error.notFound('User not found'));
+  }
 
-  const getMe = system.asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-    if(!req.userId){
-      return next(error.unauthorized('No authenticated user.'));
-    }
+  return res.status(204);
+};
 
-    const data = await user.getUserById(req.userId);
+const nukeMePlease = async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.userId) {
+    return next(error.unauthorized('No authenticated user.'));
+  }
 
-    if (!data) {
-      return next(error.notFound('Authenticated user not found.'));
-    }
+  console.info(`User ${req.userId} requested nukeMePlease lol`);
+  await user.deleteUser(req.userId);
+  return res.status(204);
+};
 
-    return res.status(200).json(data);
-  });
+const getMe = async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.userId) {
+    return next(error.unauthorized('No authenticated user.'));
+  }
+
+  const data = await user.getUserById(req.userId);
+
+  if (!data) {
+    return next(error.notFound('Authenticated user not found.'));
+  }
+
+  return res.status(200).json(data);
+};
 
 export default {
   getAllUsers,
