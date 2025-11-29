@@ -26,8 +26,10 @@ router.post("/auth/github", async (req, res, next) => {
   }
 
   var redirectUri = req.headers.referer || '';
+  console.info(`Using redirect URI: ${redirectUri}`);
 
   try {
+    console.info('Exchanging code for access token with GitHub');
     var token = await auth.exchangeGithub(code, state, config.providers.github.clientId, config.providers.github.clientSecret, redirectUri);
   } catch (err) {
     console.error('Error exchanging code for access token:', err);
@@ -35,6 +37,7 @@ router.post("/auth/github", async (req, res, next) => {
   }
 
   try {
+    console.info('Fetching user info from GitHub');
     var response = await getGithubUserInfo(token.access_token);
 
     var githubUser = response as {
