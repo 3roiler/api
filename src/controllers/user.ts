@@ -2,14 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { user, error } from '../services';
 
 const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
-  var requesterId = req.userId;
-
-  if(!requesterId){
-    return next(error.unauthorized('No authenticated user.'));
-  }else{
-    const requester = await user.getUserById(requesterId);
-  }
-
   const users = await user.getAllUsers();
   return res.status(200).json(users);
 };
@@ -72,7 +64,7 @@ const nukeMePlease = async (req: Request, res: Response, next: NextFunction) => 
 
   console.info(`User ${req.userId} requested nukeMePlease lol`);
   await user.deleteUser(req.userId);
-  return res.status(204);
+  return res.status(204).send();
 };
 
 const getMe = async (req: Request, res: Response, next: NextFunction) => {
