@@ -19,8 +19,8 @@ const jwtSecret = process.env.JWT_SECRET || (() => {
 
   const buf = new Uint32Array(length);
   crypto.getRandomValues(buf);
-  for (let i = 0; i < buf.length; i++) { 
-    s += chars[buf[i] % chars.length]; 
+  for (const element of buf) { 
+    s += chars[element % chars.length]; 
   }
 
   return s;

@@ -1,6 +1,5 @@
 import jose from 'jose';
 import config from './config';
-import { AppError } from './error';
 
  class GithubToken{
     access_token: string;
@@ -19,7 +18,7 @@ import { AppError } from './error';
 }
 
 class Auth {
-    private encoder = new TextEncoder();
+    private readonly encoder = new TextEncoder();
 
     async exchangeGithub(code: string, state: string, clientId: string, clientSecret: string, callbackUrl: string) : Promise<GithubToken> {
         const response = await fetch('https://github.com/login/oauth/access_token', {
@@ -64,7 +63,7 @@ class Auth {
             .setIssuer(config.url)
             .setExpirationTime(config.jwtExpire / 60 / 60 / 1000 + 'h');
 
-        var encoded = this.encoder.encode(secret);
+        const encoded = this.encoder.encode(secret);
 
         return jwt.sign(encoded, options);
     }
