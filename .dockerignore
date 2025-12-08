@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+Dockerfile*
+.env
+dist/*.map
+*.md
+**/README.md
+.eslintrc.js

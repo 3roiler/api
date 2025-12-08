@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "3roiler",
+        "projectKey": "3roiler_api"
+    }
+}

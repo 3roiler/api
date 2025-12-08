@@ -1,0 +1,27 @@
+{
+    "name": "api",
+    "image": "mcr.microsoft.com/devcontainers/typescript-node:24",
+    "features": {
+        "ghcr.io/devcontainers/features/docker-in-docker": {
+            "version": "latest",
+            "moby": false
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "github.vscode-github-actions",
+                "dbaeumer.vscode-eslint",
+                "GitHub.vscode-pull-request-github",
+                "ckolkman.vscode-postgres",
+                "christian-kohler.npm-intellisense",
+                "SonarSource.sonarlint-vscode",
+                "DavidAnson.vscode-markdownlint",
+                "Gruntfuggly.todo-tree",
+                "redhat.vscode-yaml",
+                "ms-vscode.makefile-tools"
+            ]
+        }
+    },
+    "postStartCommand": "npm install"
+}
