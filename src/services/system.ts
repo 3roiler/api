@@ -65,7 +65,7 @@ async function verifyToken(token: string) {
 }
 
 
-const authHandler = async (req: Request, next: NextFunction) => {
+const authHandler = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   let type;
   let token;
