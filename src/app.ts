@@ -1,4 +1,5 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
+import limiter from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { config, logger, system, error } from './services';
 import routes from './routes';
@@ -13,6 +14,12 @@ app.use(cors({
   origin: config.corsOrigin,
   credentials: true
 }));
+
+app.use(limiter({
+  windowMs: 600000,
+  max: 100
+}));
+
 app.use(logger);
 app.use(config.prefix, routes);
 app.use((req: Request, res: Response, next: NextFunction) => {
