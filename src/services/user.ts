@@ -1,7 +1,7 @@
 import type { QueryResult } from 'pg';
 import persistence from './persistence';
 import type { User } from '../models/index.js';
-import { UUID } from 'crypto';
+import { UUID } from 'node:crypto';
 
 const USER_COLUMNS = `
   id,
@@ -97,7 +97,7 @@ export class UserService {
       [email]
     );
 
-    return parseInt(result.rows[0].count, 10) > 0;
+    return Number.parseInt(result.rows[0].count, 10) > 0;
   }
 
   async createUser(options: CreateUserOptions): Promise<User> {
