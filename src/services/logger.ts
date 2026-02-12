@@ -4,6 +4,10 @@ const logger = (req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   
   res.on('finish', () => {
+    if (res.locals.skipLogging) {
+      return;
+    }
+
     const method = req.method;
     const url = req.originalUrl;
     const status = res.statusCode;
