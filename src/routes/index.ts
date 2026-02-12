@@ -9,10 +9,17 @@ router.get('/', async (_, res) => {
   res.status(200).send('running');
 });
 
-router.get('/health', async (_, res) => {
-  const healthState = await system.getHealthState();
-  res.status(healthState.ready ? 200 : 503).json(healthState);
-});
+router.get(
+  '/health',
+  (_, res, next) => {
+    res.locals.skipLogging = true;
+    next();
+  },
+  async (_, res) => {
+    const healthState = await system.getHealthState();
+    res.status(healthState.ready ? 200 : 503).json(healthState);
+  }
+);
 
 router.post('/login', system.loginHandler);
 router.post('/register', system.registerHandler);
