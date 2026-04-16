@@ -28,14 +28,19 @@ const jwtSecret = process.env.JWT_SECRET || (() => {
 
 const jwtExpire = Number(process.env.JWT_EXPIRE) || 24 * 60 * 60 * 1000; // 24 hours
 
-// CONSIDERATION generic oauth config --> hardcode for now, because github is enough
 const github = {
   clientId: process.env.GITHUB_CLIENT_ID || '',
   clientSecret: process.env.GITHUB_CLIENT_SECRET || ''
 };
 
+const twitch = {
+  clientId: process.env.TWITCH_CLIENT_ID || '',
+  clientSecret: process.env.TWITCH_CLIENT_SECRET || ''
+};
+
 const providers = {
-  github
+  github,
+  twitch
 };
 
 export const config = {
