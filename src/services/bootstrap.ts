@@ -2,7 +2,33 @@ import config from './config.js';
 import userService from './user.js';
 import type { User } from '../models/index.js';
 
-const ADMIN_PERMISSIONS = ['blog.write', 'admin.manage'] as const;
+/**
+ * Permissions granted to every user whose email matches `ADMIN_EMAILS`.
+ *
+ * `admin.manage` stays the umbrella permission — historically the only gate
+ * on admin-only UI. The `dashboard.*` keys are finer-grained: the refreshed
+ * admin UI (one shared `/dashboard` shell with sub-sections) checks them so
+ * non-admins can be given, say, only `dashboard.metrics` without unlocking
+ * user CRUD. Admins always get all of them bootstrapped here to stay in
+ * sync with the old umbrella behaviour.
+ *
+ * - `dashboard.view`     – allowed to open `/dashboard` at all
+ * - `dashboard.blog`     – blog post admin (list + editor)
+ * - `dashboard.users`    – user CRUD
+ * - `dashboard.groups`   – group CRUD
+ * - `dashboard.settings` – site config (DO token, feature flags, …)
+ * - `dashboard.metrics`  – DO / Postgres metrics proxy
+ */
+const ADMIN_PERMISSIONS = [
+  'blog.write',
+  'admin.manage',
+  'dashboard.view',
+  'dashboard.blog',
+  'dashboard.users',
+  'dashboard.groups',
+  'dashboard.settings',
+  'dashboard.metrics'
+] as const;
 
 /**
  * Idempotent startup hook that grants admin-level permissions to any user
