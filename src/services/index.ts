@@ -4,6 +4,8 @@ import error from './error';
 import logger from './logger';
 import system from './system';
 import user from './user';
+import blog from './blog';
+import bootstrap from './bootstrap';
 
 export {
   config,
@@ -11,5 +13,7 @@ export {
   error,
   logger,
   system,
-  user
+  user,
+  blog,
+  bootstrap
 };

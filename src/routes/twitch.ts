@@ -40,17 +40,32 @@ router.post('/oauth', async (req, res, next) => {
 
   const token = await auth.exchangeTwitch(code, clientId, clientSecret, callbackUrl);
   const twitchUser = await getTwitchUserInfo(token.access_token, clientId);
+  const email = twitchUser.email || null;
 
+  // 1. Fast path: user already linked via twitch_id.
   let existingUser = await userService.getUserByTwitchId(twitchUser.id);
 
+  // 2. Fall back to linking by email when Twitch exposed one (requires
+  //    the user:read:email scope) and it matches an existing user.
+  if (!existingUser && email) {
+    const userByEmail = await userService.getUserByEmail(email);
+    if (userByEmail) {
+      await userService.updateTwitch(userByEmail.id, twitchUser.id);
+      existingUser = userByEmail;
+    }
+  }
+
+  // 3. First time we see this user — create them.
   if (!existingUser) {
     existingUser = await userService.createUser({
       name: twitchUser.login,
       displayName: twitchUser.display_name,
-      email: twitchUser.email || null
+      email
     });
-
     await userService.updateTwitch(existingUser.id, twitchUser.id);
+  } else if (email) {
+    // Backfill email if it was missing before.
+    await userService.setEmailIfMissing(existingUser.id, email);
   }
 
   await userService.saveTwitchToken(

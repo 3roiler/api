@@ -1,7 +1,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import limiter from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
-import { config, logger, system, error } from './services';
+import { config, logger, system, error, bootstrap } from './services';
 import routes from './routes';
 import cors from 'cors';
 
@@ -36,6 +36,12 @@ app.listen(config.port, () => {
   ║   API Prefix: ${config.prefix.padEnd(24)}║
   ╚════════════════════════════════════════╝
   `);
+
+  // Best-effort: seed admin permissions for configured ADMIN_EMAILS. Runs
+  // async after listen(); a failure logs but does not crash the server.
+  bootstrap.seedAdminPermissions().catch(err => {
+    console.error('[bootstrap] seedAdminPermissions failed:', err);
+  });
 });
 
 process.on('unhandledRejection', (err: Error) => {

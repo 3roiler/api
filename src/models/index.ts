@@ -70,3 +70,15 @@ export interface RefreshToken {
   revokedAt: Date | null;
   metadata: Record<string, unknown>;
 }
+
+export interface BlogPost {
+  id: UUID;
+  authorId: UUID;
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  content: string;
+  publishedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date | null;
+}

@@ -12,6 +12,13 @@ const redisUrl = process.env.REDIS_URL || '';
 const contact = process.env.CONTACT_EMAIL || '';
 const corsOrigin = process.env.CORS_ORIGIN || '*';
 
+// Users whose email matches this value get `blog.write` granted at startup.
+// Comma-separated list. Leave empty to disable auto-seeding.
+const adminEmails = (process.env.ADMIN_EMAILS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 const jwtSecret = process.env.JWT_SECRET || (() => {
   const length = 256;
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -54,7 +61,8 @@ export const config = {
   jwtSecret,
   jwtExpire,
   providers,
-  corsOrigin
+  corsOrigin,
+  adminEmails
 };
 
 export default config;
