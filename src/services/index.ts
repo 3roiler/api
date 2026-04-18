@@ -7,6 +7,7 @@ import user from './user';
 import blog from './blog';
 import bootstrap from './bootstrap';
 import permissions from './permissions';
+import group from './group';
 
 export {
   config,
@@ -17,5 +18,6 @@ export {
   user,
   blog,
   bootstrap,
-  permissions
+  permissions,
+  group
 };
