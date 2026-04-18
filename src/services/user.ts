@@ -46,6 +46,15 @@ export class UserService {
     return result.rows[0] ?? null;
   }
 
+  async getUserByEmail(email: string): Promise<User | null> {
+    const result: QueryResult<User> = await persistence.database.query(
+      `SELECT ${USER_COLUMNS} FROM public."user" WHERE lower(email) = lower($1)`,
+      [email]
+    );
+
+    return result.rows[0] ?? null;
+  }
+
   async getUserById(id: string): Promise<User | null> {
     const result: QueryResult<User> = await persistence.database.query(
       `SELECT ${USER_COLUMNS} FROM public."user" WHERE id = $1`,
@@ -72,6 +81,26 @@ export class UserService {
     );
 
     return result.rows.map(row => row.permission).concat(resultGroup.rows.map(row => row.permission));
+  }
+
+  async hasPermission(id: string, permission: string): Promise<boolean> {
+    const permissions = await this.getPermissions(id);
+    return permissions.includes(permission);
+  }
+
+  /**
+   * Grants a permission to a user (idempotent — does nothing if already present).
+   */
+  async grantPermission(userId: string, permission: string): Promise<void> {
+    await persistence.database.query(
+      `INSERT INTO public."user_permission" (user_id, permission)
+       SELECT $1::uuid, $2
+       WHERE NOT EXISTS (
+         SELECT 1 FROM public."user_permission"
+         WHERE user_id = $1::uuid AND permission = $2
+       )`,
+      [userId, permission]
+    );
   }
 
   async authenticate(username: string, password: string): Promise<User | null> {
@@ -120,6 +149,20 @@ export class UserService {
        SET github_id = $1, updated_at = NOW()
        WHERE id = $2`,
       [githubId, userId]
+    );
+  }
+
+  /**
+   * Backfills an email on a user row if it is currently NULL.
+   * Never overwrites an existing address (OAuth providers may report
+   * different emails and we don't want silent changes).
+   */
+  async setEmailIfMissing(userId: string, email: string): Promise<void> {
+    await persistence.database.query(
+      `UPDATE public."user"
+       SET email = $1, updated_at = NOW()
+       WHERE id = $2 AND email IS NULL`,
+      [email, userId]
     );
   }
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { config, user as userService } from '../services';
+import { config, user as userService } from '../services/index.js';
 import auth from '../services/auth.js';
-import AppError from '../services/error';
+import AppError from '../services/error.js';
 
 const router = Router();
 
@@ -32,22 +32,38 @@ router.post("/oauth", async (req, res, next) => {
   const response = await getGithubUserInfo(token.access_token);
 
   const githubUser = response as {
-    id: string;
+    id: string | number;
     login: string;
-    name: string;
-    email: string;
+    name: string | null;
+    email: string | null;
   };
+  const githubId = String(githubUser.id);
+  const email = githubUser.email;
 
-  let existingUser = await userService.getUserByGithubId(githubUser.id);
+  // 1. Fast path: user already linked via github_id.
+  let existingUser = await userService.getUserByGithubId(githubId);
 
+  // 2. Fall back to linking by email when a GitHub email is available and
+  //    matches an existing user (e.g. they signed up with Twitch first).
+  if (!existingUser && email) {
+    const userByEmail = await userService.getUserByEmail(email);
+    if (userByEmail) {
+      await userService.updateGithub(userByEmail.id, githubId);
+      existingUser = userByEmail;
+    }
+  }
+
+  // 3. First time we see this user — create them.
   if (!existingUser) {
     existingUser = await userService.createUser({
       name: githubUser.login,
       displayName: githubUser.name,
-      email: githubUser.email
+      email
     });
-
-    await userService.updateGithub(existingUser.id, githubUser.id);
+    await userService.updateGithub(existingUser.id, githubId);
+  } else if (email) {
+    // Backfill email if it was missing before.
+    await userService.setEmailIfMissing(existingUser.id, email);
   }
 
   const jwtToken = await auth.generateToken({
