@@ -17,6 +17,20 @@ services:
     networks:
       - api-network
 
+  redis:
+    image: redis:8-alpine
+    container_name: api-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - api-network
+
   pgadmin:
     image: dpage/pgadmin4:9.10
     container_name: api-pgadmin
@@ -42,10 +56,13 @@ services:
     environment:
       PORT: ${API_PORT:-3000}
       DATABASE_URL: postgresql://${PG_USER:-postgres}:${PG_PASSWORD:-postgres}@postgres:${PG_PORT:-5432}/${PG_DB:-api_db}
+      REDIS_URL: redis://redis:6379
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - api-network
