@@ -71,8 +71,10 @@ router.post("/oauth", async (req, res, next) => {
     login: string;
     name: string | null;
     email: string | null;
+    avatar_url: string | null;
   };
   const githubId = String(githubUser.id);
+  const avatarUrl = typeof githubUser.avatar_url === 'string' ? githubUser.avatar_url : null;
   // GitHub omits email from /user when the user set it to private. Fall
   // back to the /user/emails endpoint so cross-provider linking by email
   // and `ADMIN_EMAILS` bootstrap can actually find the user.
@@ -104,6 +106,19 @@ router.post("/oauth", async (req, res, next) => {
     await userService.setEmailIfMissing(existingUser.id, email);
     if (!existingUser.email) {
       existingUser = { ...existingUser, email };
+    }
+  }
+
+  // Re-sync the avatar on every login so it stays fresh when the user
+  // uploads a new GitHub avatar. Skipped if they have overridden it
+  // manually — we detect that by never writing when the existing avatar
+  // points to a non-GitHub host.
+  if (avatarUrl) {
+    const currentAvatar = existingUser.avatarUrl;
+    const userOverridden = Boolean(currentAvatar && !currentAvatar.includes('githubusercontent.com') && !currentAvatar.includes('github.com'));
+    if (!userOverridden) {
+      await userService.syncAvatarUrl(existingUser.id, avatarUrl);
+      existingUser = { ...existingUser, avatarUrl };
     }
   }
 

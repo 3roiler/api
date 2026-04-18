@@ -1,6 +1,6 @@
 import type { QueryResult } from 'pg';
 import persistence from './persistence';
-import type { User } from '../models/index.js';
+import type { User, SocialLink } from '../models/index.js';
 import { UUID } from 'node:crypto';
 
 const USER_COLUMNS = `
@@ -10,6 +10,7 @@ const USER_COLUMNS = `
   name,
   display_name AS "displayName",
   email,
+  avatar_url AS "avatarUrl",
   created_at AS "createdAt",
   updated_at AS "updatedAt"
 `;
@@ -24,6 +25,12 @@ export interface UpdateUserOptions {
   name?: string | null;
   displayName?: string | null;
   email?: string | null;
+  avatarUrl?: string | null;
+}
+
+export interface SocialLinkInput {
+  label: string;
+  url: string;
 }
 
 export class UserService {
@@ -284,7 +291,8 @@ export class UserService {
     const fields: Array<[string, unknown]> = [
       ['name', updates.name],
       ['display_name', updates.displayName],
-      ['email', updates.email]
+      ['email', updates.email],
+      ['avatar_url', updates.avatarUrl]
     ];
 
     const setFragments: string[] = [];
@@ -318,7 +326,78 @@ export class UserService {
   async deleteUser(id: string): Promise<boolean> {
     const result = await persistence.database.query('DELETE FROM public."user" WHERE id = $1', [id]);
     return (result.rowCount ?? 0) > 0;
-  }  
+  }
+
+  /**
+   * Sets the avatar URL if it is currently NULL, or always syncs it when
+   * `force` is true. Used on every OAuth login to keep the avatar fresh —
+   * GitHub invalidates avatar URLs when the user uploads a new one.
+   */
+  async syncAvatarUrl(userId: string, avatarUrl: string, force = true): Promise<void> {
+    if (force) {
+      await persistence.database.query(
+        `UPDATE public."user"
+         SET avatar_url = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [avatarUrl, userId]
+      );
+      return;
+    }
+    await persistence.database.query(
+      `UPDATE public."user"
+       SET avatar_url = $1, updated_at = NOW()
+       WHERE id = $2 AND avatar_url IS NULL`,
+      [avatarUrl, userId]
+    );
+  }
+
+  // ─── Social links ─────────────────────────────────────────────────────
+
+  async listSocialLinks(userId: string): Promise<SocialLink[]> {
+    const result: QueryResult<SocialLink> = await persistence.database.query(
+      `SELECT id,
+              user_id AS "userId",
+              label,
+              url,
+              sort_order AS "sortOrder",
+              created_at AS "createdAt",
+              updated_at AS "updatedAt"
+       FROM public."user_social_link"
+       WHERE user_id = $1
+       ORDER BY sort_order ASC, created_at ASC`,
+      [userId]
+    );
+    return result.rows;
+  }
+
+  /**
+   * Replaces the full set of social links for a user atomically. Callers
+   * send the desired list (in display order) and we diff against the DB
+   * — this is simpler for the UI than individual add/update/remove calls
+   * and avoids orphaned rows. Sort order is derived from array index.
+   */
+  async replaceSocialLinks(userId: string, links: SocialLinkInput[]): Promise<SocialLink[]> {
+    const client = await persistence.database.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM public."user_social_link" WHERE user_id = $1`, [userId]);
+      for (let i = 0; i < links.length; i++) {
+        const link = links[i];
+        await client.query(
+          `INSERT INTO public."user_social_link" (user_id, label, url, sort_order)
+           VALUES ($1, $2, $3, $4)`,
+          [userId, link.label, link.url, i]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+    return this.listSocialLinks(userId);
+  }
 }
 
 export default new UserService();

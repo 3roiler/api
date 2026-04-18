@@ -6,8 +6,19 @@ export interface User {
   displayName: string | null;
   email: string | null;
   twitchId: string | null;
+  avatarUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface SocialLink {
+  id: UUID;
+  userId: UUID;
+  label: string;
+  url: string;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date | null;
 }
 
 export interface TwitchTokenData {
