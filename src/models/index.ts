@@ -82,6 +82,19 @@ export interface RefreshToken {
   metadata: Record<string, unknown>;
 }
 
+/**
+ * Visibility regime for a blog post.
+ *
+ * - `public`        – anyone, including anonymous visitors (current default).
+ * - `authenticated` – any logged-in user, regardless of groups.
+ * - `group`         – only users who belong to at least one of the groups
+ *                     linked via `blog_post_group_access`.
+ *
+ * Authors (users with `blog.write`) always see every post they wrote, and
+ * admins see drafts too — visibility applies to *readers*, not authors.
+ */
+export type BlogPostVisibility = 'public' | 'authenticated' | 'group';
+
 export interface BlogPost {
   id: UUID;
   authorId: UUID;
@@ -90,6 +103,13 @@ export interface BlogPost {
   excerpt: string | null;
   content: string;
   publishedAt: Date | null;
+  visibility: BlogPostVisibility;
+  /**
+   * Populated only for the `group` visibility. Empty array otherwise, so
+   * the frontend doesn't need a null-check on a field that is visible in
+   * the editor for every post.
+   */
+  accessGroupIds: UUID[];
   createdAt: Date;
   updatedAt: Date | null;
 }
