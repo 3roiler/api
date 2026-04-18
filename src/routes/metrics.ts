@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import limiter from 'express-rate-limit';
 import { system } from '../services/index.js';
 import metricsController from '../controllers/metrics.js';
 import requirePermission from '../middleware/requirePermission.js';
@@ -21,7 +22,21 @@ import requirePermission from '../middleware/requirePermission.js';
 
 const router = Router();
 
-const gate = [system.authHandler, requirePermission('dashboard.metrics')];
+/**
+ * The metrics dashboard auto-refreshes up to every 15 s across ~7 endpoints,
+ * which would eat the global 100 req / 10 min bucket in under a minute. This
+ * sub-router gets a dedicated, far more generous limit — still per-IP, still
+ * bounded, but tuned for a live admin view. Applied before auth so an unauth
+ * flood of 429s doesn't also count toward the global pool.
+ */
+const metricsLimiter = limiter({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const gate = [metricsLimiter, system.authHandler, requirePermission('dashboard.metrics')];
 
 router.get('/status', ...gate, metricsController.getStatus);
 

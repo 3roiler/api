@@ -31,6 +31,16 @@ import AppError from './error.js';
 const DO_API_BASE = 'https://api.digitalocean.com/v2';
 const CACHE_PREFIX = 'metrics:';
 const CACHE_TTL_SECONDS = 30;
+/**
+ * Hard upper bound for every outbound DO call. DO's monitoring endpoints
+ * occasionally sit on requests for 30+ seconds; without a timeout our
+ * handler hangs past the DO App Platform ingress's 60 s gateway timeout
+ * and the client sees a bare 504 *without* CORS headers — which the
+ * browser then surfaces as a misleading CORS error. Failing fast here
+ * keeps the error inside our own pipeline where we can decorate it with
+ * a clean identifier + CORS.
+ */
+const DO_FETCH_TIMEOUT_MS = 10_000;
 
 export type MetricWindow = '1h' | '6h' | '24h';
 const VALID_WINDOWS: readonly MetricWindow[] = ['1h', '6h', '24h'];
@@ -98,9 +108,20 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(DO_FETCH_TIMEOUT_MS)
     });
   } catch (err) {
+    // `AbortSignal.timeout` throws `TimeoutError` (a DOMException). Distinguish
+    // it from connectivity errors so the UI can show "aufgegeben" vs
+    // "nicht erreichbar".
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      console.error('DO API fetch timed out', { path, timeoutMs: DO_FETCH_TIMEOUT_MS });
+      throw AppError.serviceUnavailable(
+        `DigitalOcean API did not respond within ${DO_FETCH_TIMEOUT_MS / 1000}s.`,
+        'METRICS_UPSTREAM_TIMEOUT'
+      );
+    }
     console.error('DO API fetch failed', { path, err });
     throw AppError.serviceUnavailable('Could not reach DigitalOcean API.', 'METRICS_UPSTREAM_UNREACHABLE');
   }
@@ -112,6 +133,11 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
     );
   }
   if (res.status === 404) {
+    // Body text sometimes carries a useful hint ("resource not found" vs
+    // "invalid UUID format") — read it for the server log, but keep the
+    // client-facing message stable.
+    const body = await safeReadBody(res);
+    console.error('DO API 404', { path, body });
     throw AppError.notFound(
       'DigitalOcean returned 404 for the requested resource. Check the configured app_id / database_id.',
       'METRICS_RESOURCE_NOT_FOUND'
@@ -124,13 +150,24 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
     );
   }
   if (!res.ok) {
-    console.error('DO API returned error', { path, status: res.status });
+    const body = await safeReadBody(res);
+    console.error('DO API returned error', { path, status: res.status, body });
     throw AppError.serviceUnavailable(
       `DigitalOcean API returned ${res.status}.`,
       'METRICS_UPSTREAM_FAILED'
     );
   }
   return res.json() as Promise<T>;
+}
+
+/** Read a response body without throwing; only used for error logs. */
+async function safeReadBody(res: Response): Promise<string> {
+  try {
+    const text = await res.text();
+    return text.slice(0, 500);
+  } catch {
+    return '<unreadable>';
+  }
 }
 
 function windowToRange(window: MetricWindow): { start: string; end: string } {
@@ -201,10 +238,18 @@ export async function getAppMetric(
 }
 
 /**
- * DO managed-database monitoring metrics. `metric` maps to DO's
- * `cpu_usage`, `memory_usage`, or `disk_usage` family on
- * `/monitoring/metrics/database/*`.
+ * DO managed-database monitoring metrics. Lives under the `dbaas` family —
+ * the names and `host_id` (= cluster UUID) are the canonical ones per DO's
+ * current API reference. Historical sources (incl. some godo versions)
+ * document `/monitoring/metrics/database/*`, which no longer exists and
+ * previously produced 404s that looked like config problems.
  */
+const DB_METRIC_PATHS: Record<'cpu' | 'memory' | 'disk', string> = {
+  cpu: 'cpu_utilization_percent',
+  memory: 'memory_utilization_percent',
+  disk: 'disk_utilization_percent'
+};
+
 export async function getDatabaseMetric(
   metric: 'cpu' | 'memory' | 'disk',
   window: MetricWindow
@@ -214,7 +259,10 @@ export async function getDatabaseMetric(
   const cacheKey = `${CACHE_PREFIX}db:${databaseId}:${metric}:${window}`;
   return fetchCached(cacheKey, async () => {
     const query = new URLSearchParams({ host_id: databaseId, start, end });
-    return doFetch(`/monitoring/metrics/database/${metric}?${query.toString()}`, token);
+    return doFetch(
+      `/monitoring/metrics/dbaas/${DB_METRIC_PATHS[metric]}?${query.toString()}`,
+      token
+    );
   });
 }
 
