@@ -1,11 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import blogService from '../services/blog.js';
+import userService from '../services/user.js';
 import AppError from '../services/error.js';
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,118}[a-z0-9]$/;
 
-function isAuthor(req: Request): boolean {
-  const permissions = (req.res?.locals.permissions as string[] | undefined) ?? [];
+/**
+ * Author check for the public GET routes. `requirePermission` is not in the
+ * chain there (they're public), so we can't rely on `res.locals.permissions`.
+ * `optionalAuthHandler` may have set `req.userId`; if it did, pull the live
+ * permission list. Anonymous visitors short-circuit to `false`.
+ */
+async function isAuthor(req: Request): Promise<boolean> {
+  if (req.res?.locals.permissions) {
+    return (req.res.locals.permissions as string[]).includes('blog.write');
+  }
+  if (!req.userId) return false;
+  const permissions = await userService.getPermissions(req.userId);
   return permissions.includes('blog.write');
 }
 
@@ -18,7 +29,8 @@ function validateSlug(slug: unknown, next: NextFunction): slug is string {
 }
 
 const listPosts = async (req: Request, res: Response) => {
-  const includeDrafts = isAuthor(req) && req.query.drafts === 'true';
+  const author = await isAuthor(req);
+  const includeDrafts = author && req.query.drafts === 'true';
   const limit = Math.min(Number.parseInt(String(req.query.limit ?? '50'), 10) || 50, 100);
   const offset = Math.max(Number.parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
 
@@ -28,7 +40,7 @@ const listPosts = async (req: Request, res: Response) => {
 
 const getPostBySlug = async (req: Request<{ slug: string }>, res: Response, next: NextFunction) => {
   const { slug } = req.params;
-  const includeDrafts = isAuthor(req);
+  const includeDrafts = await isAuthor(req);
   const post = await blogService.getPostBySlug(slug, includeDrafts);
   if (!post) {
     return next(AppError.notFound('Post not found', 'POST_NOT_FOUND'));

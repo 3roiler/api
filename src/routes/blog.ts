@@ -5,11 +5,10 @@ import requirePermission from '../middleware/requirePermission.js';
 
 const router = Router();
 
-// Public reads. `authHandler`-as-optional would be cleaner but the current
-// implementation hard-rejects unauthenticated requests, so the public routes
-// skip it and `includeDrafts` falls back to false for non-authors.
-router.get('/', blogController.listPosts);
-router.get('/:slug', blogController.getPostBySlug);
+// Public reads — `optionalAuthHandler` decodes the session cookie if present
+// (so authors get drafts) but does not 401 anonymous visitors.
+router.get('/', system.optionalAuthHandler, blogController.listPosts);
+router.get('/:slug', system.optionalAuthHandler, blogController.getPostBySlug);
 
 // Write routes require auth + blog.write.
 const writeGate = [system.authHandler, requirePermission('blog.write')];

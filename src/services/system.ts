@@ -83,8 +83,38 @@ const authHandler = async (req: Request, res: Response, next: NextFunction) => {
     req.userId = accessToken.payload.sub;
     return next();
   }
-  
+
   return next(AppError.unauthorized('Authorization header missing or malformed'));
+};
+
+/**
+ * Like `authHandler`, but does not reject unauthenticated requests. If a
+ * valid Bearer/cookie token is present, `req.userId` is populated; otherwise
+ * the request proceeds anonymously. Useful for endpoints that are public but
+ * return richer data to signed-in users (e.g. blog list including drafts).
+ */
+const optionalAuthHandler = async (req: Request, _res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  let type;
+  let token;
+  if (authHeader) {
+    type = authHeader?.split(' ')[0];
+    token = authHeader?.split(' ')[1];
+  } else {
+    type = 'Bearer';
+    token = req.cookies['access_token'];
+  }
+
+  if (type === 'Bearer' && token) {
+    try {
+      const accessToken = await verifyToken(token);
+      req.userId = accessToken.payload.sub;
+    } catch {
+      // Bad / expired / revoked token on a public endpoint: treat as anonymous.
+    }
+  }
+
+  return next();
 };
 
 const registerHandler = async (req: Request, res: Response, next: NextFunction) => {
@@ -215,6 +245,7 @@ async function getHealthState() {
 export default {
   errorHandler,
   authHandler,
+  optionalAuthHandler,
   registerHandler,
   loginHandler,
   logoutHandler,
