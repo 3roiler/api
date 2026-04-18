@@ -5,8 +5,19 @@ export interface User {
   name: string;
   displayName: string | null;
   email: string | null;
+  twitchId: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface TwitchTokenData {
+  userId: UUID;
+  twitchUserId: string;
+  twitchLogin: string;
+  accessToken: string;
+  refreshToken: string;
+  scopes: string;
+  expiresAt: Date;
 }
 
 export interface Group {

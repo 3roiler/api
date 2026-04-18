@@ -6,6 +6,7 @@ import { UUID } from 'node:crypto';
 const USER_COLUMNS = `
   id,
   github_id,
+  twitch_id AS "twitchId",
   name,
   display_name AS "displayName",
   email,
@@ -120,6 +121,54 @@ export class UserService {
        WHERE id = $2`,
       [githubId, userId]
     );
+  }
+
+  async getUserByTwitchId(twitchId: string): Promise<User | null> {
+    const result: QueryResult<User> = await persistence.database.query(
+      `SELECT ${USER_COLUMNS}
+       FROM public."user"
+       WHERE twitch_id = $1`,
+      [twitchId]
+    );
+
+    return result.rows[0] ?? null;
+  }
+
+  async updateTwitch(userId: string, twitchId: string): Promise<void> {
+    await persistence.database.query(
+      `UPDATE public."user"
+       SET twitch_id = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [twitchId, userId]
+    );
+  }
+
+  async saveTwitchToken(userId: string, twitchUserId: string, twitchLogin: string, accessToken: string, refreshToken: string, scopes: string, expiresIn: number): Promise<void> {
+    const expiresAt = new Date(Date.now() + expiresIn * 1000);
+    await persistence.database.query(
+      `INSERT INTO public."twitch_token" (user_id, twitch_user_id, twitch_login, access_token, refresh_token, scopes, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id) DO UPDATE SET
+         twitch_user_id = EXCLUDED.twitch_user_id,
+         twitch_login = EXCLUDED.twitch_login,
+         access_token = EXCLUDED.access_token,
+         refresh_token = EXCLUDED.refresh_token,
+         scopes = EXCLUDED.scopes,
+         expires_at = EXCLUDED.expires_at,
+         updated_at = NOW()`,
+      [userId, twitchUserId, twitchLogin, accessToken, refreshToken, scopes, expiresAt]
+    );
+  }
+
+  async getTwitchToken(userId: string): Promise<{ accessToken: string; refreshToken: string; twitchUserId: string; twitchLogin: string; expiresAt: Date } | null> {
+    const result = await persistence.database.query(
+      `SELECT access_token AS "accessToken", refresh_token AS "refreshToken", twitch_user_id AS "twitchUserId", twitch_login AS "twitchLogin", expires_at AS "expiresAt"
+       FROM public."twitch_token"
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    return result.rows[0] ?? null;
   }
 
   async createLogin(userId: string, username: string, password: string): Promise<UUID> {

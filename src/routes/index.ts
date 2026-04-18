@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { system } from '../services';
 import user from './user.js';
 import github from './github.js';
+import twitch from './twitch.js';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.post('/register', system.registerHandler);
 router.post('/logout', system.logoutHandler);
 
 router.use('/github', github);
+router.use('/twitch', twitch);
 
 router.use('/user', system.authHandler, user);
 
