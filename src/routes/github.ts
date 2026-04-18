@@ -20,6 +20,41 @@ async function getGithubUserInfo(accessToken: string) {
   return await response.json();
 }
 
+interface GithubEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+  visibility: string | null;
+}
+
+/**
+ * Falls back to the `/user/emails` endpoint when the `/user` response
+ * returned `email: null` (happens when the user has their email set to
+ * private on GitHub). Requires the `user:email` scope, which the frontend
+ * already requests. Returns the primary verified email, or `null` if none
+ * of the entries qualify.
+ */
+async function getPrimaryVerifiedEmail(accessToken: string): Promise<string | null> {
+  const response = await fetch('https://api.github.com/user/emails', {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Accept': 'application/vnd.github.v3+json'
+    }
+  });
+
+  if (!response.ok) {
+    // A 404 / 403 here just means the token lacks user:email scope — treat
+    // as "no email available" rather than failing the whole login.
+    return null;
+  }
+
+  const emails = (await response.json()) as GithubEmail[];
+  const primary = emails.find((e) => e.primary && e.verified);
+  if (primary) return primary.email;
+  const anyVerified = emails.find((e) => e.verified);
+  return anyVerified?.email ?? null;
+}
+
 router.post("/oauth", async (req, res, next) => {
   const { code, state } = req.body;
 
@@ -38,7 +73,10 @@ router.post("/oauth", async (req, res, next) => {
     email: string | null;
   };
   const githubId = String(githubUser.id);
-  const email = githubUser.email;
+  // GitHub omits email from /user when the user set it to private. Fall
+  // back to the /user/emails endpoint so cross-provider linking by email
+  // and `ADMIN_EMAILS` bootstrap can actually find the user.
+  const email = githubUser.email ?? (await getPrimaryVerifiedEmail(token.access_token));
 
   // 1. Fast path: user already linked via github_id.
   let existingUser = await userService.getUserByGithubId(githubId);
