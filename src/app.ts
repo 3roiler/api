@@ -16,9 +16,17 @@ app.use(cors({
   credentials: true
 }));
 
+/**
+ * Global 100 req / 10 min per-IP limit. The metrics router owns its own,
+ * more generous limiter — the live dashboard auto-refreshes across 7
+ * endpoints and would otherwise chew through this bucket in ~7 min,
+ * knocking everything else (profile, blog, settings) offline for the
+ * same IP. `skip` keeps those two scopes independent.
+ */
 app.use(limiter({
   windowMs: 600000,
-  max: 100
+  max: 100,
+  skip: (req) => req.path.startsWith(`${config.prefix}/admin/metrics/`)
 }));
 
 app.use(logger);
