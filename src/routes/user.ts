@@ -7,6 +7,7 @@ router.get('/', userController.getAllUsers);
 router.post('/', userController.createUser);
 
 router.get('/me', userController.getMe);
+router.put('/me', userController.updateMe);
 router.post('/nuke', userController.nukeMePlease);
 
 router.get('/:id', userController.getUserById);

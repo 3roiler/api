@@ -55,6 +55,32 @@ async function getPrimaryVerifiedEmail(accessToken: string): Promise<string | nu
   return anyVerified?.email ?? null;
 }
 
+/**
+ * True if `value` is an http(s) URL whose hostname is either
+ * `avatars.githubusercontent.com` / any `*.githubusercontent.com`
+ * subdomain, or `github.com`. Used to decide whether an existing
+ * avatar is still "provider-managed" and may be overwritten by a
+ * fresh OAuth sync.
+ *
+ * Parsing the URL (rather than substring-matching the raw text) is
+ * what the CodeQL "Incomplete URL substring sanitization" rule is
+ * after — arbitrary hosts can embed the marker in their path.
+ */
+function isGithubHostedAvatar(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+    const host = url.hostname.toLowerCase();
+    return (
+      host === 'github.com' ||
+      host === 'githubusercontent.com' ||
+      host.endsWith('.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
 router.post("/oauth", async (req, res, next) => {
   const { code, state } = req.body;
 
@@ -71,8 +97,10 @@ router.post("/oauth", async (req, res, next) => {
     login: string;
     name: string | null;
     email: string | null;
+    avatar_url: string | null;
   };
   const githubId = String(githubUser.id);
+  const avatarUrl = typeof githubUser.avatar_url === 'string' ? githubUser.avatar_url : null;
   // GitHub omits email from /user when the user set it to private. Fall
   // back to the /user/emails endpoint so cross-provider linking by email
   // and `ADMIN_EMAILS` bootstrap can actually find the user.
@@ -104,6 +132,21 @@ router.post("/oauth", async (req, res, next) => {
     await userService.setEmailIfMissing(existingUser.id, email);
     if (!existingUser.email) {
       existingUser = { ...existingUser, email };
+    }
+  }
+
+  // Re-sync the avatar on every login so it stays fresh when the user
+  // uploads a new GitHub avatar. Skipped if they have overridden it
+  // manually — we detect that by parsing the stored URL and comparing
+  // the hostname against GitHub's own hosts. Substring checks on the
+  // raw URL are unsafe because attackers can embed the marker anywhere
+  // (e.g. `https://evil.example/githubusercontent.com`).
+  if (avatarUrl) {
+    const currentAvatar = existingUser.avatarUrl;
+    const userOverridden = currentAvatar ? !isGithubHostedAvatar(currentAvatar) : false;
+    if (!userOverridden) {
+      await userService.syncAvatarUrl(existingUser.id, avatarUrl);
+      existingUser = { ...existingUser, avatarUrl };
     }
   }
 
