@@ -8,6 +8,8 @@ import blog from './blog';
 import bootstrap from './bootstrap';
 import permissions from './permissions';
 import group from './group';
+import crypto from './crypto';
+import settings from './settings';
 
 export {
   config,
@@ -19,5 +21,7 @@ export {
   blog,
   bootstrap,
   permissions,
-  group
+  group,
+  crypto,
+  settings
 };
