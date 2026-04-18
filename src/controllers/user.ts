@@ -29,7 +29,8 @@ const getMe = async (req: Request, res: Response, next: NextFunction) => {
     return next(error.notFound('Authenticated user not found.'));
   }
 
-  return res.status(200).json(data);
+  const permissions = await user.getPermissions(req.userId);
+  return res.status(200).json({ ...data, permissions });
 };
 
 const createUser = async (req: Request, res: Response, next: NextFunction) => {
