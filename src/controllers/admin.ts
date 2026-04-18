@@ -18,6 +18,22 @@ const DISPLAY_NAME_MAX = 100;
 const EMAIL_MAX = 320;
 const NAME_MAX = 100;
 
+/**
+ * Lightweight email validator without regex backtracking. Requires exactly
+ * one `@`, a non-empty local part, and a domain with at least one dot in
+ * a non-edge position. Done with string ops on purpose so static analysis
+ * tools don't flag a `[^\s@]+@[^\s@]+\.[^\s@]+` style pattern as ReDoS.
+ */
+function isValidEmail(value: string): boolean {
+  if (value.length === 0 || value.length > EMAIL_MAX) return false;
+  if (/\s/.test(value)) return false;
+  const at = value.indexOf('@');
+  if (at < 1 || at !== value.lastIndexOf('@')) return false;
+  const domain = value.slice(at + 1);
+  const dot = domain.lastIndexOf('.');
+  return dot > 0 && dot < domain.length - 1;
+}
+
 // ─── Users ──────────────────────────────────────────────────────────────
 
 const listUsers = async (_req: Request, res: Response) => {
@@ -33,8 +49,8 @@ const updateUser = async (req: Request<{ id: string }>, res: Response, next: Nex
       (typeof displayName !== 'string' || displayName.length > DISPLAY_NAME_MAX)) {
     return next(AppError.badRequest(`displayName must be a string ≤ ${DISPLAY_NAME_MAX} chars.`, 'BAD_DISPLAY_NAME'));
   }
-  if (email !== undefined && email !== null &&
-      (typeof email !== 'string' || email.length > EMAIL_MAX || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+  if (email !== undefined && email !== null && email !== '' &&
+      (typeof email !== 'string' || !isValidEmail(email))) {
     return next(AppError.badRequest('email must be a valid address.', 'BAD_EMAIL'));
   }
   if (name !== undefined && (typeof name !== 'string' || name.trim().length === 0 || name.length > NAME_MAX)) {
