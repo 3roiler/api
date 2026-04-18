@@ -4,6 +4,7 @@ import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
 import blog from './blog.js';
+import admin from './admin.js';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.post('/logout', system.logoutHandler);
 router.use('/github', github);
 router.use('/twitch', twitch);
 router.use('/blog', blog);
+router.use('/admin', admin);
 
 router.use('/user', system.authHandler, user);
 

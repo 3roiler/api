@@ -103,6 +103,61 @@ export class UserService {
     );
   }
 
+  /**
+   * Revokes a direct user permission. Returns `true` if a row was deleted,
+   * `false` if no matching grant existed. Group-inherited permissions are
+   * NOT touched — those are managed via group membership.
+   */
+  async revokePermission(userId: string, permission: string): Promise<boolean> {
+    const result = await persistence.database.query(
+      `DELETE FROM public."user_permission"
+       WHERE user_id = $1::uuid AND permission = $2`,
+      [userId, permission]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Lists every user with their direct and group-inherited permissions
+   * aggregated into a single sorted array per user. Used by the admin UI.
+   */
+  async getAllUsersWithPermissions(): Promise<Array<User & { permissions: string[]; directPermissions: string[] }>> {
+    const result: QueryResult<User & { permissions: string[] | null; directPermissions: string[] | null }> =
+      await persistence.database.query(
+        `SELECT ${USER_COLUMNS},
+          COALESCE(
+            ARRAY(
+              SELECT DISTINCT p FROM (
+                SELECT permission AS p FROM public."user_permission" WHERE user_id = u.id
+                UNION
+                SELECT gp.permission AS p
+                FROM public."user_group" ug
+                JOIN public."group_permission" gp ON ug.group_id = gp.group_id
+                WHERE ug.user_id = u.id
+              ) x
+              ORDER BY p
+            ),
+            ARRAY[]::text[]
+          ) AS permissions,
+          COALESCE(
+            ARRAY(
+              SELECT permission FROM public."user_permission"
+              WHERE user_id = u.id
+              ORDER BY permission
+            ),
+            ARRAY[]::text[]
+          ) AS "directPermissions"
+         FROM public."user" u
+         ORDER BY created_at DESC`
+      );
+
+    return result.rows.map(row => ({
+      ...row,
+      permissions: row.permissions ?? [],
+      directPermissions: row.directPermissions ?? []
+    }));
+  }
+
   async authenticate(username: string, password: string): Promise<User | null> {
     const result: QueryResult<{ user_id: string }> = await persistence.database.query(
       `SELECT ul.user_id

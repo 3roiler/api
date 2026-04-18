@@ -6,6 +6,7 @@ import system from './system';
 import user from './user';
 import blog from './blog';
 import bootstrap from './bootstrap';
+import permissions from './permissions';
 
 export {
   config,
@@ -15,5 +16,6 @@ export {
   system,
   user,
   blog,
-  bootstrap
+  bootstrap,
+  permissions
 };

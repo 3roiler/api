@@ -1,7 +1,7 @@
 import config from './config.js';
 import userService from './user.js';
 
-const ADMIN_PERMISSIONS = ['blog.write'] as const;
+const ADMIN_PERMISSIONS = ['blog.write', 'admin.manage'] as const;
 
 /**
  * Idempotent startup hook that grants admin-level permissions to any user
