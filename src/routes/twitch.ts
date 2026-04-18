@@ -209,7 +209,7 @@ router.post('/chat/send', system.authHandler, async (req, res, next) => {
  * GET /api/twitch/me
  * Get current user's Twitch info (requires auth)
  */
-router.get('/me', system.authHandler, async (req, res, next) => {
+router.get('/me', system.authHandler, async (req, res, _next) => {
   const userId = req.userId!;
   const twitchToken = await userService.getTwitchToken(userId);
 

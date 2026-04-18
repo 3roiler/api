@@ -7,6 +7,7 @@ import { user } from './index.js';
 import { JWTExpired, JWTInvalid } from 'jose/errors';
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Express uses module augmentation via namespace; no ESM alternative exists.
   namespace Express {
     interface Request {
       userId?: string | null;
