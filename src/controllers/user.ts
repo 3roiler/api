@@ -6,7 +6,7 @@ const getAllUsers = async (res: Response) => {
   return res.status(200).json(users);
 };
 
-const getUserById = async (req: Request, res: Response, next: NextFunction) => {
+const getUserById = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
   const data = await user.getUserById(id);
@@ -46,7 +46,7 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
   return res.status(201).json(data);
 };
 
-const updateUser = async (req: Request, res: Response, next: NextFunction) => {
+const updateUser = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const { name, displayName, email } = req.body;
 
@@ -67,7 +67,7 @@ const updateUser = async (req: Request, res: Response, next: NextFunction) => {
   return res.status(200).json(data);
 };
 
-const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
+const deleteUser = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const deleted = await user.deleteUser(id);
 
