@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { config, user as userService } from '../services/index.js';
+import { config, user as userService, bootstrap } from '../services/index.js';
 import auth from '../services/auth.js';
 import AppError from '../services/error.js';
 
@@ -102,6 +102,18 @@ router.post("/oauth", async (req, res, next) => {
   } else if (email) {
     // Backfill email if it was missing before.
     await userService.setEmailIfMissing(existingUser.id, email);
+    if (!existingUser.email) {
+      existingUser = { ...existingUser, email };
+    }
+  }
+
+  // Per-login seed: catches admins whose server booted before they existed,
+  // or whose email was only just backfilled. Idempotent — safe to run every
+  // login. Best-effort: a failure here shouldn't block the login.
+  try {
+    await bootstrap.seedAdminForUser(existingUser);
+  } catch (err) {
+    console.error('[github/oauth] seedAdminForUser failed:', err);
   }
 
   const jwtToken = await auth.generateToken({
