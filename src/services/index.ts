@@ -10,6 +10,7 @@ import permissions from './permissions';
 import group from './group';
 import crypto from './crypto';
 import settings from './settings';
+import metrics from './metrics';
 
 export {
   config,
@@ -23,5 +24,6 @@ export {
   permissions,
   group,
   crypto,
-  settings
+  settings,
+  metrics
 };

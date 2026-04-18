@@ -3,6 +3,7 @@ import { system } from '../services/index.js';
 import adminController from '../controllers/admin.js';
 import requirePermission from '../middleware/requirePermission.js';
 import settingsRouter from './settings.js';
+import metricsRouter from './metrics.js';
 
 const router = Router();
 
@@ -17,6 +18,11 @@ const adminGate = [system.authHandler, requirePermission('admin.manage')];
 // the door for a future "settings operator" role without also granting
 // user CRUD.
 router.use('/settings', settingsRouter);
+
+// DigitalOcean metrics proxy. Gated on `dashboard.metrics` internally so a
+// future "metrics viewer" role could see utilisation without also getting
+// admin capabilities. Reads token + resource IDs from the settings store.
+router.use('/metrics', metricsRouter);
 
 // ─── Permissions catalog ────────────────────────────────────────────────
 router.get('/permissions', ...adminGate, adminController.listPermissions);
