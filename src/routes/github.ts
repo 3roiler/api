@@ -55,6 +55,32 @@ async function getPrimaryVerifiedEmail(accessToken: string): Promise<string | nu
   return anyVerified?.email ?? null;
 }
 
+/**
+ * True if `value` is an http(s) URL whose hostname is either
+ * `avatars.githubusercontent.com` / any `*.githubusercontent.com`
+ * subdomain, or `github.com`. Used to decide whether an existing
+ * avatar is still "provider-managed" and may be overwritten by a
+ * fresh OAuth sync.
+ *
+ * Parsing the URL (rather than substring-matching the raw text) is
+ * what the CodeQL "Incomplete URL substring sanitization" rule is
+ * after — arbitrary hosts can embed the marker in their path.
+ */
+function isGithubHostedAvatar(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+    const host = url.hostname.toLowerCase();
+    return (
+      host === 'github.com' ||
+      host === 'githubusercontent.com' ||
+      host.endsWith('.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
 router.post("/oauth", async (req, res, next) => {
   const { code, state } = req.body;
 
@@ -111,11 +137,13 @@ router.post("/oauth", async (req, res, next) => {
 
   // Re-sync the avatar on every login so it stays fresh when the user
   // uploads a new GitHub avatar. Skipped if they have overridden it
-  // manually — we detect that by never writing when the existing avatar
-  // points to a non-GitHub host.
+  // manually — we detect that by parsing the stored URL and comparing
+  // the hostname against GitHub's own hosts. Substring checks on the
+  // raw URL are unsafe because attackers can embed the marker anywhere
+  // (e.g. `https://evil.example/githubusercontent.com`).
   if (avatarUrl) {
     const currentAvatar = existingUser.avatarUrl;
-    const userOverridden = Boolean(currentAvatar && !currentAvatar.includes('githubusercontent.com') && !currentAvatar.includes('github.com'));
+    const userOverridden = currentAvatar ? !isGithubHostedAvatar(currentAvatar) : false;
     if (!userOverridden) {
       await userService.syncAvatarUrl(existingUser.id, avatarUrl);
       existingUser = { ...existingUser, avatarUrl };
