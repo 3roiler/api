@@ -234,23 +234,24 @@ async function safeReadBody(res: Response): Promise<string> {
 }
 
 /**
- * DO's monitoring spec is fussy about the two timestamp params: the canonical
- * names are `metric_timestamp_start` / `metric_timestamp_end` (the plain
- * `start`/`end` aliases work on some endpoints but not all), and values must
- * be unix seconds as **strings**. Returning a `URLSearchParams`-ready pair
- * keeps callers from reinventing that shape for each metric.
+ * DO's monitoring spec is fussy about the timestamp params. In the OpenAPI
+ * document the parameter *component* is called `metric_timestamp_start` /
+ * `metric_timestamp_end`, but the actual HTTP query-parameter name (the
+ * `name:` field) is just `start` / `end`:
+ *
+ *     metric_timestamp_start:
+ *       in: query
+ *       name: start          ← this is what goes on the wire
+ *
+ * Sending `metric_timestamp_start=…` therefore leaves the real `start`
+ * param unset, and DO responds with "failed to parse start time: cannot
+ * parse to a valid timestamp". Values are unix seconds as **strings**.
  */
-function windowToRange(window: MetricWindow): {
-  metric_timestamp_start: string;
-  metric_timestamp_end: string;
-} {
+function windowToRange(window: MetricWindow): { start: string; end: string } {
   const endSec = Math.floor(Date.now() / 1000);
   const hours = window === '24h' ? 24 : window === '6h' ? 6 : 1;
   const startSec = endSec - hours * 60 * 60;
-  return {
-    metric_timestamp_start: String(startSec),
-    metric_timestamp_end: String(endSec)
-  };
+  return { start: String(startSec), end: String(endSec) };
 }
 
 // ─── Public surface ────────────────────────────────────────────────────────
