@@ -127,8 +127,15 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
   }
 
   if (res.status === 401 || res.status === 403) {
+    // Scope problems are indistinguishable from "wrong token" at the HTTP
+    // layer — both are 401/403 — so we point the user at both causes. The
+    // monitoring endpoints specifically require `monitoring:read`; a token
+    // that only has `app:read` + `database:read` will work for summary but
+    // not for any time-series call.
+    const body = await safeReadBody(res);
+    console.error('DO API rejected token', { path, status: res.status, body });
     throw AppError.serviceUnavailable(
-      'DigitalOcean API rejected the token. Check `digitalocean.token` in the dashboard settings.',
+      'DigitalOcean API rejected the token. Check `digitalocean.token` in the dashboard settings and ensure the PAT has the `monitoring:read` scope.',
       'METRICS_AUTH_FAILED'
     );
   }
@@ -170,12 +177,24 @@ async function safeReadBody(res: Response): Promise<string> {
   }
 }
 
-function windowToRange(window: MetricWindow): { start: string; end: string } {
+/**
+ * DO's monitoring spec is fussy about the two timestamp params: the canonical
+ * names are `metric_timestamp_start` / `metric_timestamp_end` (the plain
+ * `start`/`end` aliases work on some endpoints but not all), and values must
+ * be unix seconds as **strings**. Returning a `URLSearchParams`-ready pair
+ * keeps callers from reinventing that shape for each metric.
+ */
+function windowToRange(window: MetricWindow): {
+  metric_timestamp_start: string;
+  metric_timestamp_end: string;
+} {
   const endSec = Math.floor(Date.now() / 1000);
   const hours = window === '24h' ? 24 : window === '6h' ? 6 : 1;
   const startSec = endSec - hours * 60 * 60;
-  // DO monitoring API expects unix seconds as strings.
-  return { start: String(startSec), end: String(endSec) };
+  return {
+    metric_timestamp_start: String(startSec),
+    metric_timestamp_end: String(endSec)
+  };
 }
 
 // ─── Public surface ────────────────────────────────────────────────────────
@@ -229,25 +248,28 @@ export async function getAppMetric(
   window: MetricWindow
 ): Promise<unknown> {
   const [token, appId] = await Promise.all([getDoToken(), getAppId()]);
-  const { start, end } = windowToRange(window);
+  const range = windowToRange(window);
   const cacheKey = `${CACHE_PREFIX}app:${appId}:${metric}:${window}`;
   return fetchCached(cacheKey, async () => {
-    const query = new URLSearchParams({ app_id: appId, start, end });
+    const query = new URLSearchParams({ app_id: appId, ...range });
     return doFetch(`/monitoring/metrics/apps/${metric}?${query.toString()}`, token);
   });
 }
 
 /**
- * DO managed-database monitoring metrics. Lives under the `dbaas` family —
- * the names and `host_id` (= cluster UUID) are the canonical ones per DO's
- * current API reference. Historical sources (incl. some godo versions)
- * document `/monitoring/metrics/database/*`, which no longer exists and
- * previously produced 404s that looked like config problems.
+ * DO managed-database monitoring metrics. The public OpenAPI spec **only**
+ * documents these paths for MySQL today (`/monitoring/metrics/database/mysql/
+ * {cpu,memory,disk}_usage` with `db_id` as a query param and a required
+ * `aggregate=avg` hint). There is no documented Postgres equivalent — for
+ * Postgres clusters DO exposes metrics via a Prometheus scrape endpoint
+ * instead. We call the MySQL path anyway on the theory that the backend may
+ * accept any DBaaS cluster UUID; when it returns 404 the UI gets a clean
+ * "Daten nicht verfügbar" card instead of a crash.
  */
 const DB_METRIC_PATHS: Record<'cpu' | 'memory' | 'disk', string> = {
-  cpu: 'cpu_utilization_percent',
-  memory: 'memory_utilization_percent',
-  disk: 'disk_utilization_percent'
+  cpu: 'cpu_usage',
+  memory: 'memory_usage',
+  disk: 'disk_usage'
 };
 
 export async function getDatabaseMetric(
@@ -255,12 +277,16 @@ export async function getDatabaseMetric(
   window: MetricWindow
 ): Promise<unknown> {
   const [token, databaseId] = await Promise.all([getDoToken(), getDatabaseId()]);
-  const { start, end } = windowToRange(window);
+  const range = windowToRange(window);
   const cacheKey = `${CACHE_PREFIX}db:${databaseId}:${metric}:${window}`;
   return fetchCached(cacheKey, async () => {
-    const query = new URLSearchParams({ host_id: databaseId, start, end });
+    const query = new URLSearchParams({
+      db_id: databaseId,
+      aggregate: 'avg',
+      ...range
+    });
     return doFetch(
-      `/monitoring/metrics/dbaas/${DB_METRIC_PATHS[metric]}?${query.toString()}`,
+      `/monitoring/metrics/database/mysql/${DB_METRIC_PATHS[metric]}?${query.toString()}`,
       token
     );
   });
