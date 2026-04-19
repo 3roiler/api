@@ -8,6 +8,11 @@ import AppError from '../services/error.js';
  * and forwards the raw JSON to the caller. AppError instances bubble up to
  * the global errorHandler untouched so the frontend gets the same
  * `{ identifier, message }` shape it already knows how to display.
+ *
+ * The app-scoped handlers take `:appId` from the URL and defer the
+ * "is-this-configured" check to the service. That keeps controllers
+ * decision-free and prevents a caller from using our stored DO token as an
+ * oracle against arbitrary UUIDs.
  */
 
 const DEFAULT_WINDOW: MetricWindow = '1h';
@@ -21,13 +26,29 @@ function parseWindow(req: Request, next: NextFunction): MetricWindow | null {
   return raw;
 }
 
+function parseAppId(req: Request, next: NextFunction): string | null {
+  const raw = typeof req.params.appId === 'string' ? req.params.appId.trim() : '';
+  if (!raw) {
+    next(AppError.badRequest('Missing :appId path parameter.', 'MISSING_APP_ID'));
+    return null;
+  }
+  return raw;
+}
+
 const getStatus = async (_req: Request, res: Response) => {
   const status = await metricsService.getStatus();
   res.status(200).json(status);
 };
 
-const getAppSummary = async (_req: Request, res: Response) => {
-  const data = await metricsService.getAppSummary();
+const listApps = async (_req: Request, res: Response) => {
+  const apps = await metricsService.listApps();
+  res.status(200).json(apps);
+};
+
+const getAppSummary = async (req: Request, res: Response, next: NextFunction) => {
+  const appId = parseAppId(req, next);
+  if (!appId) return;
+  const data = await metricsService.getAppSummary(appId);
   res.status(200).json(data);
 };
 
@@ -37,16 +58,20 @@ const getDatabaseSummary = async (_req: Request, res: Response) => {
 };
 
 const getAppCpu = async (req: Request, res: Response, next: NextFunction) => {
+  const appId = parseAppId(req, next);
+  if (!appId) return;
   const window = parseWindow(req, next);
   if (!window) return;
-  const data = await metricsService.getAppMetric('cpu_percentage', window);
+  const data = await metricsService.getAppMetric(appId, 'cpu_percentage', window);
   res.status(200).json(data);
 };
 
 const getAppMemory = async (req: Request, res: Response, next: NextFunction) => {
+  const appId = parseAppId(req, next);
+  if (!appId) return;
   const window = parseWindow(req, next);
   if (!window) return;
-  const data = await metricsService.getAppMetric('memory_percentage', window);
+  const data = await metricsService.getAppMetric(appId, 'memory_percentage', window);
   res.status(200).json(data);
 };
 
@@ -73,6 +98,7 @@ const getDatabaseDisk = async (req: Request, res: Response, next: NextFunction) 
 
 export default {
   getStatus,
+  listApps,
   getAppSummary,
   getDatabaseSummary,
   getAppCpu,
