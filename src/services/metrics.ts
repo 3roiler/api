@@ -62,15 +62,71 @@ async function getDoToken(): Promise<string> {
   return token;
 }
 
-async function getAppId(): Promise<string> {
-  const v = await settingsService.getSettingValue<unknown>('digitalocean.app_id', null);
-  if (typeof v !== 'string' || v.length === 0) {
-    throw AppError.serviceUnavailable(
-      'DigitalOcean app_id not configured. Set `digitalocean.app_id` in the dashboard settings.',
-      'METRICS_NOT_CONFIGURED'
+export type ConfiguredApp = { id: string; label: string };
+
+/**
+ * Read the list of DigitalOcean apps the operator wants to monitor.
+ *
+ * Canonical storage is `digitalocean.apps`, a JSON array of
+ * `{id, label}` (order preserved = UI order). The legacy single-value
+ * `digitalocean.app_id` is still honoured as a one-element fallback so an
+ * existing deployment doesn't break the moment this ships — the user can
+ * migrate at their leisure via the Settings UI.
+ *
+ * Every entry is normalised: trimmed, no empties, `label` defaults to the
+ * first 8 chars of the UUID so the UI always has something to render.
+ */
+async function getConfiguredApps(): Promise<ConfiguredApp[]> {
+  const raw = await settingsService.getSettingValue<unknown>('digitalocean.apps', null);
+  if (Array.isArray(raw)) {
+    const normalised = raw
+      .map((entry): ConfiguredApp | null => {
+        if (!entry || typeof entry !== 'object') return null;
+        const id = typeof (entry as { id?: unknown }).id === 'string'
+          ? ((entry as { id: string }).id).trim()
+          : '';
+        if (!id) return null;
+        const labelRaw = (entry as { label?: unknown }).label;
+        const label = typeof labelRaw === 'string' && labelRaw.trim().length > 0
+          ? labelRaw.trim()
+          : id.slice(0, 8);
+        return { id, label };
+      })
+      .filter((x): x is ConfiguredApp => x !== null);
+    if (normalised.length > 0) return normalised;
+  }
+
+  // Legacy fallback: pre-multi-app deployments stored a single UUID under
+  // `digitalocean.app_id`. Keep reading it so migrations are a UI step,
+  // not a deploy step.
+  const legacy = await settingsService.getSettingValue<unknown>('digitalocean.app_id', null);
+  if (typeof legacy === 'string' && legacy.trim().length > 0) {
+    const id = legacy.trim();
+    return [{ id, label: 'App' }];
+  }
+
+  throw AppError.serviceUnavailable(
+    'DigitalOcean apps not configured. Set `digitalocean.apps` (array of {id, label}) in the dashboard settings.',
+    'METRICS_NOT_CONFIGURED'
+  );
+}
+
+/**
+ * Ensure `appId` is one of the configured apps before we turn it into a
+ * DO API call. Without this the `:appId` path param would let any caller
+ * use our stored PAT to probe arbitrary DO resources — a small but real
+ * token-leak vector.
+ */
+async function assertAppConfigured(appId: string): Promise<ConfiguredApp> {
+  const apps = await getConfiguredApps();
+  const hit = apps.find((a) => a.id === appId);
+  if (!hit) {
+    throw AppError.notFound(
+      `App ID ${appId} is not in the configured list.`,
+      'METRICS_APP_NOT_CONFIGURED'
     );
   }
-  return v;
+  return hit;
 }
 
 async function getDatabaseId(): Promise<string> {
@@ -199,16 +255,20 @@ function windowToRange(window: MetricWindow): {
 
 // ─── Public surface ────────────────────────────────────────────────────────
 
-/** Tell the UI up-front which bits of config are missing. */
+/**
+ * Tell the UI up-front which bits of config are missing. `appsConfigured`
+ * is a count (not a boolean) so the dashboard can render a per-app summary
+ * without a second round trip just to learn the length.
+ */
 export async function getStatus(): Promise<{
   tokenConfigured: boolean;
-  appIdConfigured: boolean;
+  appsConfigured: number;
   databaseIdConfigured: boolean;
   refreshDefaultSeconds: number;
 }> {
-  const [tokenMeta, appIdRow, databaseIdRow, refreshDefaultRaw] = await Promise.all([
+  const [tokenMeta, apps, databaseIdRow, refreshDefaultRaw] = await Promise.all([
     settingsService.getSecretMeta('digitalocean.token'),
-    settingsService.getSetting<string>('digitalocean.app_id'),
+    getConfiguredApps().catch(() => [] as ConfiguredApp[]),
     settingsService.getSetting<string>('digitalocean.database_id'),
     settingsService.getSettingValue<unknown>('metrics.refresh_default_seconds', 30)
   ]);
@@ -219,14 +279,23 @@ export async function getStatus(): Promise<{
 
   return {
     tokenConfigured: tokenMeta !== null,
-    appIdConfigured: typeof appIdRow?.value === 'string' && appIdRow.value.length > 0,
+    appsConfigured: apps.length,
     databaseIdConfigured: typeof databaseIdRow?.value === 'string' && databaseIdRow.value.length > 0,
     refreshDefaultSeconds: Number.isFinite(parsedRefresh) && parsedRefresh > 0 ? parsedRefresh : 30
   };
 }
 
-export async function getAppSummary(): Promise<unknown> {
-  const [token, appId] = await Promise.all([getDoToken(), getAppId()]);
+/**
+ * Public surface for the UI's app-selector: one small call returns every
+ * configured app's `{id, label}`. Intentionally does not expose the DO
+ * token or any per-app secret state.
+ */
+export async function listApps(): Promise<ConfiguredApp[]> {
+  return getConfiguredApps();
+}
+
+export async function getAppSummary(appId: string): Promise<unknown> {
+  const [token] = await Promise.all([getDoToken(), assertAppConfigured(appId)]);
   return fetchCached(`${CACHE_PREFIX}app:${appId}:summary`, async () =>
     doFetch(`/apps/${encodeURIComponent(appId)}`, token)
   );
@@ -244,10 +313,11 @@ export async function getDatabaseSummary(): Promise<unknown> {
  * the endpoint path matches DO's `/monitoring/metrics/apps/<metric>` family.
  */
 export async function getAppMetric(
+  appId: string,
   metric: 'cpu_percentage' | 'memory_percentage',
   window: MetricWindow
 ): Promise<unknown> {
-  const [token, appId] = await Promise.all([getDoToken(), getAppId()]);
+  const [token] = await Promise.all([getDoToken(), assertAppConfigured(appId)]);
   const range = windowToRange(window);
   const cacheKey = `${CACHE_PREFIX}app:${appId}:${metric}:${window}`;
   return fetchCached(cacheKey, async () => {
@@ -295,6 +365,7 @@ export async function getDatabaseMetric(
 export default {
   isValidWindow,
   getStatus,
+  listApps,
   getAppSummary,
   getDatabaseSummary,
   getAppMetric,
