@@ -45,6 +45,15 @@ const jwtExpire = Number(process.env.JWT_EXPIRE) || 24 * 60 * 60 * 1000; // 24 h
  */
 const secretsKey = process.env.SECRETS_KEY || '';
 
+/**
+ * Upper bound (in bytes) for a single G-code upload. Enforced at the
+ * route level via `express.raw({ limit })` and re-checked in the service
+ * before the bytea insert, so a stray client bypass still hits the wall.
+ * Default 50 MiB — covers hobby-scale prints comfortably while keeping
+ * memory pressure predictable (the whole blob lives in RAM during upload).
+ */
+const gcodeMaxBytes = Number.parseInt(process.env.GCODE_MAX_BYTES || '52428800', 10);
+
 const github = {
   clientId: process.env.GITHUB_CLIENT_ID || '',
   clientSecret: process.env.GITHUB_CLIENT_SECRET || ''
@@ -73,7 +82,8 @@ export const config = {
   providers,
   corsOrigin,
   adminEmails,
-  secretsKey
+  secretsKey,
+  gcodeMaxBytes
 };
 
 export default config;

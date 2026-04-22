@@ -5,6 +5,8 @@ import github from './github.js';
 import twitch from './twitch.js';
 import blog from './blog.js';
 import admin from './admin.js';
+import printer from './printer.js';
+import gcode from './gcode.js';
 
 const router = Router();
 
@@ -34,5 +36,7 @@ router.use('/blog', blog);
 router.use('/admin', admin);
 
 router.use('/user', system.authHandler, user);
+router.use('/printer', system.authHandler, printer);
+router.use('/gcode', system.authHandler, gcode);
 
 export default router;

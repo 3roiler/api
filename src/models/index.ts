@@ -113,3 +113,93 @@ export interface BlogPost {
   createdAt: Date;
   updatedAt: Date | null;
 }
+
+// ─── 3D-Printer-Integration ───────────────────────────────────────────────
+
+export type PrinterStatus = 'offline' | 'online' | 'error';
+export type PrinterRole = 'owner' | 'operator' | 'viewer';
+export type PrintJobState =
+  | 'queued'
+  | 'transferring'
+  | 'printing'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface Printer {
+  id: UUID;
+  name: string;
+  model: string;
+  status: PrinterStatus;
+  agentVersion: string | null;
+  lastSeenAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+/**
+ * Printer mit Rollen-Info für den aktuellen Viewer. Wird von den
+ * Dashboard-Queries geliefert, damit das Frontend ohne Zweit-Call weiß,
+ * welche Aktionen erlaubt sind.
+ */
+export interface PrinterWithRole extends Printer {
+  role: PrinterRole;
+  canViewCamera: boolean;
+}
+
+export interface PrinterAccess {
+  id: UUID;
+  printerId: UUID;
+  userId: UUID;
+  role: PrinterRole;
+  canViewCamera: boolean;
+  grantedBy: UUID | null;
+  grantedAt: Date;
+}
+
+/**
+ * Slicer-extrahierte Metadaten. Alles optional — Cura/Orca/PrusaSlicer
+ * schreiben unterschiedliche Kommentar-Header, und bei manuell erzeugten
+ * G-Code-Dateien fehlen sie komplett.
+ */
+export interface GcodeMetadata {
+  estimatedSeconds?: number;
+  filamentMeters?: number;
+  filamentGrams?: number;
+  layerCount?: number;
+  slicer?: string;
+}
+
+export interface GcodeFile {
+  id: UUID;
+  uploadedByUserId: UUID | null;
+  originalFilename: string;
+  sha256: string;
+  sizeBytes: number;
+  metadata: GcodeMetadata;
+  createdAt: Date;
+}
+
+export interface PrintJob {
+  id: UUID;
+  printerId: UUID;
+  userId: UUID | null;
+  gcodeFileId: UUID;
+  state: PrintJobState;
+  priority: number;
+  queuedAt: Date;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  errorMessage: string | null;
+  moonrakerJobId: string | null;
+  progress: number | null;
+}
+
+export interface PrintEvent {
+  id: UUID;
+  printJobId: UUID;
+  eventType: string;
+  payload: Record<string, unknown>;
+  ts: Date;
+}

@@ -11,6 +11,8 @@ import group from './group';
 import crypto from './crypto';
 import settings from './settings';
 import metrics from './metrics';
+import printer from './printer';
+import gcode from './gcode';
 
 export {
   config,
@@ -25,5 +27,7 @@ export {
   group,
   crypto,
   settings,
-  metrics
+  metrics,
+  printer,
+  gcode
 };

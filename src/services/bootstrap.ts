@@ -18,6 +18,7 @@ import type { User } from '../models/index.js';
  * - `dashboard.groups`   – group CRUD
  * - `dashboard.settings` – site config (DO token, feature flags, …)
  * - `dashboard.metrics`  – DO / Postgres metrics proxy
+ * - `dashboard.printers` – 3D-Drucker + G-Code-Verwaltung
  */
 const ADMIN_PERMISSIONS = [
   'blog.write',
@@ -27,7 +28,8 @@ const ADMIN_PERMISSIONS = [
   'dashboard.users',
   'dashboard.groups',
   'dashboard.settings',
-  'dashboard.metrics'
+  'dashboard.metrics',
+  'dashboard.printers'
 ] as const;
 
 /**
