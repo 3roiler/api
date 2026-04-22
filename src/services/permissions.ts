@@ -24,7 +24,8 @@ export const PERMISSIONS: readonly PermissionDefinition[] = [
   { key: 'dashboard.users', description: 'User management section of the dashboard.' },
   { key: 'dashboard.groups', description: 'Group management section of the dashboard.' },
   { key: 'dashboard.settings', description: 'Site configuration section (tokens, feature flags).' },
-  { key: 'dashboard.metrics', description: 'DigitalOcean / database metrics proxy.' }
+  { key: 'dashboard.metrics', description: 'DigitalOcean / database metrics proxy.' },
+  { key: 'dashboard.printers', description: '3D-Drucker und G-Code-Dateien verwalten.' }
 ] as const;
 
 const PERMISSION_KEYS = new Set(PERMISSIONS.map(p => p.key));
