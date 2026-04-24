@@ -5,6 +5,7 @@ import AppError from './error.js';
 import type {
   Printer,
   PrinterAccess,
+  PrinterAccessWithUser,
   PrinterRole,
   PrinterStatus,
   PrinterWithRole
@@ -26,10 +27,16 @@ const PRINTER_COLUMNS = `
   p.updated_at AS "updatedAt"
 `;
 
+/**
+ * Role hierarchy. Higher number beats lower. `contributor` sits between
+ * viewer and operator — they can submit their own jobs and manage their
+ * own uploads but not moderate the queue.
+ */
 const ROLE_RANK: Record<PrinterRole, number> = {
   viewer: 1,
-  operator: 2,
-  owner: 3
+  contributor: 2,
+  operator: 3,
+  owner: 4
 };
 
 export interface CreatePrinterOptions {
@@ -53,6 +60,7 @@ export interface GrantAccessOptions {
   userId: string;
   role: PrinterRole;
   canViewCamera?: boolean;
+  canViewQueue?: boolean;
   grantedBy: string;
 }
 
@@ -82,7 +90,8 @@ export class PrinterService {
     const result: QueryResult<PrinterWithRole> = await persistence.database.query(
       `SELECT ${PRINTER_COLUMNS},
               pa.role,
-              pa.can_view_camera AS "canViewCamera"
+              pa.can_view_camera AS "canViewCamera",
+              pa.can_view_queue AS "canViewQueue"
        FROM public."printer" p
        JOIN public."printer_access" pa ON pa.printer_id = p.id
        WHERE pa.user_id = $1::uuid
@@ -103,7 +112,8 @@ export class PrinterService {
     const result: QueryResult<PrinterWithRole> = await persistence.database.query(
       `SELECT ${PRINTER_COLUMNS},
               pa.role,
-              pa.can_view_camera AS "canViewCamera"
+              pa.can_view_camera AS "canViewCamera",
+              pa.can_view_queue AS "canViewQueue"
        FROM public."printer" p
        JOIN public."printer_access" pa ON pa.printer_id = p.id
        WHERE p.id = $1::uuid AND pa.user_id = $2::uuid`,
@@ -144,8 +154,8 @@ export class PrinterService {
 
       await client.query(
         `INSERT INTO public."printer_access"
-           (printer_id, user_id, role, can_view_camera, granted_by)
-         VALUES ($1::uuid, $2::uuid, 'owner', true, $2::uuid)`,
+           (printer_id, user_id, role, can_view_camera, can_view_queue, granted_by)
+         VALUES ($1::uuid, $2::uuid, 'owner', true, true, $2::uuid)`,
         [printerId, ownerUserId]
       );
 
@@ -266,27 +276,48 @@ export class PrinterService {
 
   // ─── Access / ACL ─────────────────────────────────────────────────────
 
-  async listAccess(printerId: string): Promise<PrinterAccess[]> {
-    const result: QueryResult<PrinterAccess> = await persistence.database.query(
-      `SELECT id,
-              printer_id AS "printerId",
-              user_id AS "userId",
-              role,
-              can_view_camera AS "canViewCamera",
-              granted_by AS "grantedBy",
-              granted_at AS "grantedAt"
-       FROM public."printer_access"
-       WHERE printer_id = $1::uuid
+  async listAccess(printerId: string): Promise<PrinterAccessWithUser[]> {
+    // JOIN user so the frontend can show "Jane Doe (@jdoe)" without
+    // an N+1 lookup per row. Left join would be wrong: every access
+    // row points at an existing user via FK CASCADE.
+    const result: QueryResult<PrinterAccessWithUser> = await persistence.database.query(
+      `SELECT pa.id,
+              pa.printer_id AS "printerId",
+              pa.user_id AS "userId",
+              pa.role,
+              pa.can_view_camera AS "canViewCamera",
+              pa.can_view_queue AS "canViewQueue",
+              pa.granted_by AS "grantedBy",
+              pa.granted_at AS "grantedAt",
+              u.name AS "userName",
+              u.display_name AS "userDisplayName",
+              u.avatar_url AS "userAvatarUrl"
+       FROM public."printer_access" pa
+       JOIN public."user" u ON u.id = pa.user_id
+       WHERE pa.printer_id = $1::uuid
        ORDER BY
-         CASE role WHEN 'owner' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END,
-         granted_at ASC`,
+         CASE pa.role
+           WHEN 'owner' THEN 0
+           WHEN 'operator' THEN 1
+           WHEN 'contributor' THEN 2
+           ELSE 3
+         END,
+         pa.granted_at ASC`,
       [printerId]
     );
     return result.rows;
   }
 
   async grantAccess(options: GrantAccessOptions): Promise<PrinterAccess> {
-    const { printerId, userId, role, canViewCamera = false, grantedBy } = options;
+    const {
+      printerId, userId, role,
+      canViewCamera = false,
+      // Default the queue flag true for operator, false for everyone
+      // else. Caller can override — but not-passing means "sensible
+      // default" rather than silently making everyone a spectator.
+      canViewQueue = role === 'operator',
+      grantedBy
+    } = options;
     if (role === 'owner') {
       throw AppError.badRequest(
         'Owner role cannot be granted via this endpoint. Transfer ownership through a dedicated flow.',
@@ -296,11 +327,12 @@ export class PrinterService {
 
     const result: QueryResult<PrinterAccess> = await persistence.database.query(
       `INSERT INTO public."printer_access"
-         (printer_id, user_id, role, can_view_camera, granted_by)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid)
+         (printer_id, user_id, role, can_view_camera, can_view_queue, granted_by)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid)
        ON CONFLICT (printer_id, user_id) DO UPDATE SET
          role = EXCLUDED.role,
          can_view_camera = EXCLUDED.can_view_camera,
+         can_view_queue = EXCLUDED.can_view_queue,
          granted_by = EXCLUDED.granted_by,
          granted_at = NOW()
        RETURNING id,
@@ -308,11 +340,43 @@ export class PrinterService {
                  user_id AS "userId",
                  role,
                  can_view_camera AS "canViewCamera",
+                 can_view_queue AS "canViewQueue",
                  granted_by AS "grantedBy",
                  granted_at AS "grantedAt"`,
-      [printerId, userId, role, canViewCamera, grantedBy]
+      [printerId, userId, role, canViewCamera, canViewQueue, grantedBy]
     );
     return result.rows[0];
+  }
+
+  /**
+   * Returns the viewer's role **and** the can_view_queue flag in one
+   * call. Used by the jobs controller which has to branch on both
+   * (operator always sees the queue; contributor only if the flag is on).
+   * Throws 404 if no ACL row exists — we never want to leak printer IDs
+   * via distinct 403 vs 404 codes.
+   */
+  async getAccess(userId: string, printerId: string): Promise<{
+    role: PrinterRole;
+    canViewCamera: boolean;
+    canViewQueue: boolean;
+  }> {
+    const result = await persistence.database.query<{
+      role: PrinterRole;
+      canViewCamera: boolean;
+      canViewQueue: boolean;
+    }>(
+      `SELECT role,
+              can_view_camera AS "canViewCamera",
+              can_view_queue AS "canViewQueue"
+       FROM public."printer_access"
+       WHERE printer_id = $1::uuid AND user_id = $2::uuid`,
+      [printerId, userId]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw AppError.notFound('Printer not found', 'PRINTER_NOT_FOUND');
+    }
+    return row;
   }
 
   async revokeAccess(printerId: string, userId: string): Promise<boolean> {

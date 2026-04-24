@@ -6,6 +6,10 @@ const router = Router();
 router.get('/', userController.getAllUsers);
 router.post('/', userController.createUser);
 
+// Must come BEFORE `/:id` — otherwise Express treats "search" as a UUID
+// and the route never fires.
+router.get('/search', userController.searchUsers);
+
 router.get('/me', userController.getMe);
 router.put('/me', userController.updateMe);
 router.post('/nuke', userController.nukeMePlease);

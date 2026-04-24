@@ -35,6 +35,10 @@ function unauthorized(message: string, identifier: string = 'UNAUTHORIZED') {
   return new AppError(401, identifier, message);
 }
 
+function forbidden(message: string, identifier: string = 'FORBIDDEN') {
+  return new AppError(403, identifier, message);
+}
+
 export default {
   AppError,
   badRequest,
@@ -42,5 +46,6 @@ export default {
   conflict,
   internal,
   serviceUnavailable,
-  unauthorized
+  unauthorized,
+  forbidden
 };

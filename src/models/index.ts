@@ -117,8 +117,9 @@ export interface BlogPost {
 // ─── 3D-Printer-Integration ───────────────────────────────────────────────
 
 export type PrinterStatus = 'offline' | 'online' | 'error';
-export type PrinterRole = 'owner' | 'operator' | 'viewer';
+export type PrinterRole = 'owner' | 'operator' | 'contributor' | 'viewer';
 export type PrintJobState =
+  | 'requested'
   | 'queued'
   | 'transferring'
   | 'printing'
@@ -146,6 +147,7 @@ export interface Printer {
 export interface PrinterWithRole extends Printer {
   role: PrinterRole;
   canViewCamera: boolean;
+  canViewQueue: boolean;
 }
 
 export interface PrinterAccess {
@@ -154,8 +156,20 @@ export interface PrinterAccess {
   userId: UUID;
   role: PrinterRole;
   canViewCamera: boolean;
+  canViewQueue: boolean;
   grantedBy: UUID | null;
   grantedAt: Date;
+}
+
+/**
+ * Access row enriched with the referenced user's public info. The
+ * printer-access UI renders name + avatar without having to fire a
+ * separate user lookup for each row.
+ */
+export interface PrinterAccessWithUser extends PrinterAccess {
+  userName: string;
+  userDisplayName: string | null;
+  userAvatarUrl: string | null;
 }
 
 /**
