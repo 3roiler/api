@@ -42,6 +42,41 @@ export class UserService {
     return result.rows;
   }
 
+  /**
+   * Fuzzy search on name, display_name and email for sharing dialogs
+   * (e.g. printer access grant). Case-insensitive substring match;
+   * LIKE-wildcards in user input are escaped so a `%`-only query doesn't
+   * dump the whole user table. Hard-capped at 20 rows because these
+   * results land in an autocomplete dropdown, not a full list view.
+   */
+  async searchUsers(query: string, limit = 10): Promise<Array<Pick<User, 'id' | 'name' | 'displayName' | 'avatarUrl' | 'email'>>> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return [];
+    const pattern = `%${trimmed.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const cap = Math.max(1, Math.min(limit, 20));
+    const result = await persistence.database.query<Pick<User, 'id' | 'name' | 'displayName' | 'avatarUrl' | 'email'>>(
+      `SELECT id,
+              name,
+              display_name AS "displayName",
+              avatar_url AS "avatarUrl",
+              email
+       FROM public."user"
+       WHERE name ILIKE $1 ESCAPE '\\'
+          OR display_name ILIKE $1 ESCAPE '\\'
+          OR email ILIKE $1 ESCAPE '\\'
+       ORDER BY
+         CASE
+           WHEN name ILIKE $2 ESCAPE '\\' THEN 0
+           WHEN display_name ILIKE $2 ESCAPE '\\' THEN 1
+           ELSE 2
+         END,
+         COALESCE(display_name, name)
+       LIMIT $3`,
+      [pattern, `${trimmed.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`, cap]
+    );
+    return result.rows;
+  }
+
   async getUserByGithubId(githubId: string): Promise<User | null> {
     const result: QueryResult<User> = await persistence.database.query(
       `SELECT u.${USER_COLUMNS}

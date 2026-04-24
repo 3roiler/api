@@ -12,6 +12,7 @@ import crypto from './crypto';
 import settings from './settings';
 import metrics from './metrics';
 import printer from './printer';
+import printJob from './print-job';
 import gcode from './gcode';
 
 export {
@@ -29,5 +30,6 @@ export {
   settings,
   metrics,
   printer,
+  printJob,
   gcode
 };

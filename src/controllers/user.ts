@@ -52,6 +52,28 @@ const getAllUsers = async (res: Response) => {
   return res.status(200).json(users);
 };
 
+/**
+ * GET /api/user/search?q=<partial>
+ *   Authenticated user can look up other users for sharing flows
+ *   (printer access, future team invites). Returns a minimal profile —
+ *   id + display info. Email is included because a user's handle often
+ *   isn't memorable enough to pick the right row, but we cap this to
+ *   authenticated scope so it isn't a public directory.
+ */
+const searchUsers = async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.userId) {
+    return next(error.unauthorized('No authenticated user.'));
+  }
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  if (q.trim().length < 2) {
+    return res.status(200).json([]);
+  }
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '10'), 10);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 20)) : 10;
+  const results = await user.searchUsers(q, limit);
+  return res.status(200).json(results);
+};
+
 const getUserById = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
@@ -195,6 +217,7 @@ const nukeMePlease = async (req: Request, res: Response, next: NextFunction) => 
 
 export default {
   getAllUsers,
+  searchUsers,
   getUserById,
   getMe,
   updateMe,

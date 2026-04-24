@@ -6,7 +6,7 @@ import type { PrinterRole } from '../models/index.js';
 const NAME_MAX = 60;
 const MODEL_MAX = 60;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VALID_ROLES: PrinterRole[] = ['operator', 'viewer'];
+const VALID_ROLES: PrinterRole[] = ['operator', 'contributor', 'viewer'];
 
 function requireUser(req: Request): string {
   if (!req.userId) {
@@ -155,6 +155,7 @@ const grantAccess = async (req: Request<{ id: string }>, res: Response, next: Ne
       userId?: unknown;
       role?: unknown;
       canViewCamera?: unknown;
+      canViewQueue?: unknown;
     };
 
     const targetUserId = assertUuid(body.userId, 'userId');
@@ -167,12 +168,18 @@ const grantAccess = async (req: Request<{ id: string }>, res: Response, next: Ne
     if (body.canViewCamera !== undefined && typeof body.canViewCamera !== 'boolean') {
       return next(AppError.badRequest('canViewCamera muss boolean sein.', 'BAD_CAMERA_FLAG'));
     }
+    if (body.canViewQueue !== undefined && typeof body.canViewQueue !== 'boolean') {
+      return next(AppError.badRequest('canViewQueue muss boolean sein.', 'BAD_QUEUE_FLAG'));
+    }
 
     const access = await printerService.grantAccess({
       printerId,
       userId: targetUserId,
       role: body.role as PrinterRole,
       canViewCamera: body.canViewCamera === true,
+      // Falls nicht angegeben: Service nutzt Default je nach Rolle
+      // (true für operator, sonst false).
+      canViewQueue: body.canViewQueue === undefined ? undefined : body.canViewQueue,
       grantedBy
     });
     return res.status(200).json(access);
