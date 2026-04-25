@@ -20,6 +20,7 @@ router.get('/', gcodeController.listMine);
 router.post('/', rawGcode, gcodeController.uploadGcode);
 
 router.get('/:id', gcodeController.getById);
+router.get('/:id/content', gcodeController.getContent);
 router.delete('/:id', gcodeController.deleteGcode);
 
 export default router;
