@@ -28,8 +28,13 @@ export function sanitiseFilename(name: string, fallback: string): string {
   // reach the regex engine. Filenames over 1 KB are already nonsense
   // before any further work.
   const bounded = name.slice(0, 1024);
+  // `replaceAll` instead of `replace` for the sanitise pass: signals
+  // intent (we're collapsing every match, not just the first) and
+  // keeps SonarCloud's "prefer replaceAll" warning quiet. Leading /
+  // trailing strips stay on `replace` because their anchors guarantee
+  // a single match.
   const cleaned = bounded
-    .replace(FILENAME_SANITISE_RE, '_')
+    .replaceAll(FILENAME_SANITISE_RE, '_')
     .replace(LEADING_UNDERSCORES_RE, '')
     .replace(TRAILING_UNDERSCORES_RE, '');
   const cut = cleaned.slice(0, 120);

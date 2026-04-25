@@ -2,16 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { stl as stlService } from '../services/index.js';
 import config from '../services/config.js';
 import AppError from '../services/error.js';
-
-const FILENAME_HEADER = 'x-filename';
-const FILENAME_MAX = 255;
-
-function requireUser(req: Request): string {
-  if (!req.userId) {
-    throw AppError.unauthorized('No authenticated user.');
-  }
-  return req.userId;
-}
+import { requireUser, requireRawBuffer, requireFilenameHeader } from './asset-controller.js';
 
 /**
  * POST /api/stl
@@ -27,31 +18,12 @@ function requireUser(req: Request): string {
 const uploadStl = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = requireUser(req);
-
-    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-      return next(AppError.badRequest(
-        'Request body must be the raw STL bytes (Content-Type: application/octet-stream).',
-        'EMPTY_BODY'
-      ));
-    }
-    if (req.body.length > config.gcodeMaxBytes) {
-      return next(AppError.badRequest(
-        `STL überschreitet Limit (${config.gcodeMaxBytes} Bytes).`,
-        'FILE_TOO_LARGE'
-      ));
-    }
-
-    const headerName = req.header(FILENAME_HEADER);
-    if (!headerName || typeof headerName !== 'string' || headerName.length === 0 || headerName.length > FILENAME_MAX) {
-      return next(AppError.badRequest(
-        `Header \`X-Filename\` (1–${FILENAME_MAX} Zeichen) fehlt.`,
-        'MISSING_FILENAME'
-      ));
-    }
+    const buffer = requireRawBuffer(req, config.gcodeMaxBytes, 'STL');
+    const headerName = requireFilenameHeader(req);
 
     const file = await stlService.uploadStl({
       filename: headerName,
-      buffer: req.body,
+      buffer,
       uploadedByUserId: userId
     });
     return res.status(201).json(file);
@@ -77,7 +49,7 @@ const getById = async (req: Request<{ id: string }>, res: Response, next: NextFu
     const userId = requireUser(req);
     const { id } = req.params;
     const file = await stlService.getById(id);
-    if (!file || file.uploadedByUserId !== userId) {
+    if (file?.uploadedByUserId !== userId) {
       return next(AppError.notFound('STL not found', 'STL_NOT_FOUND'));
     }
     return res.status(200).json(file);
@@ -98,7 +70,7 @@ const getContent = async (req: Request<{ id: string }>, res: Response, next: Nex
     const userId = requireUser(req);
     const { id } = req.params;
     const meta = await stlService.getById(id);
-    if (!meta || meta.uploadedByUserId !== userId) {
+    if (meta?.uploadedByUserId !== userId) {
       return next(AppError.notFound('STL not found', 'STL_NOT_FOUND'));
     }
     const buf = await stlService.getContent(id);
@@ -120,7 +92,7 @@ const deleteStl = async (req: Request<{ id: string }>, res: Response, next: Next
     const userId = requireUser(req);
     const { id } = req.params;
     const file = await stlService.getById(id);
-    if (!file || file.uploadedByUserId !== userId) {
+    if (file?.uploadedByUserId !== userId) {
       return next(AppError.notFound('STL not found', 'STL_NOT_FOUND'));
     }
     const deleted = await stlService.deleteStl(id);
