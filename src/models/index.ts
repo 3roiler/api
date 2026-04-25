@@ -217,3 +217,26 @@ export interface PrintEvent {
   payload: Record<string, unknown>;
   ts: Date;
 }
+
+/**
+ * STL-Datei. Slicer-Eingabe; ein STL alleine kann nicht gedruckt
+ * werden — das Slicing nach G-Code passiert (vorerst) lokal beim
+ * Spieler. Schema bewusst parallel zu `GcodeFile` gehalten, damit
+ * Frontends mit demselben Pattern arbeiten können.
+ */
+export interface StlMetadata {
+  /** ASCII vs binary STL — Viewer nutzt unterschiedliche Parser. */
+  format?: 'ascii' | 'binary';
+  /** Triangle-Count, falls aus dem Header lesbar. */
+  triangleCount?: number;
+}
+
+export interface StlFile {
+  id: UUID;
+  uploadedByUserId: UUID | null;
+  originalFilename: string;
+  sha256: string;
+  sizeBytes: number;
+  metadata: StlMetadata;
+  createdAt: Date;
+}
