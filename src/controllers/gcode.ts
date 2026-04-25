@@ -85,6 +85,36 @@ const getById = async (req: Request<{ id: string }>, res: Response, next: NextFu
   }
 };
 
+/**
+ * GET /api/gcode/:id/content
+ *   Returns the raw G-code body as `text/plain; charset=utf-8`. Used by
+ *   the in-browser editor. Owner-scoped — the file is only readable by
+ *   its uploader. The agent download lives at `/api/agent/gcode/:id/
+ *   download` with separate auth and stricter gating.
+ *   Cap is enforced indirectly via the same `gcodeMaxBytes` limit on
+ *   upload — anything stored is by definition within bounds.
+ */
+const getContent = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
+  try {
+    const userId = requireUser(req);
+    const { id } = req.params;
+    const meta = await gcodeService.getById(id);
+    if (!meta || meta.uploadedByUserId !== userId) {
+      return next(AppError.notFound('G-code not found', 'GCODE_NOT_FOUND'));
+    }
+    const buf = await gcodeService.getContent(id);
+    if (!buf) {
+      return next(AppError.internal('G-code content missing.', 'GCODE_CONTENT_MISSING'));
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Filename', meta.originalFilename);
+    res.setHeader('X-Sha256', meta.sha256);
+    return res.status(200).send(buf);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 const deleteGcode = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
   try {
     const userId = requireUser(req);
@@ -121,5 +151,6 @@ export default {
   uploadGcode,
   listMine,
   getById,
+  getContent,
   deleteGcode
 };
