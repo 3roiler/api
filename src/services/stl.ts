@@ -2,6 +2,7 @@ import type { PoolClient, QueryResult } from 'pg';
 import { createHash } from 'node:crypto';
 import persistence from './persistence.js';
 import AppError from './error.js';
+import { sanitiseFilename } from './file-helpers.js';
 import type { StlFile, StlMetadata } from '../models/index.js';
 
 /**
@@ -18,8 +19,6 @@ const STL_COLUMNS = `
   sf.metadata,
   sf.created_at AS "createdAt"
 `;
-
-const FILENAME_SANITISE_RE = /[^a-zA-Z0-9._-]+/g;
 
 /**
  * Detects whether the buffer is an ASCII or binary STL — or neither.
@@ -62,12 +61,6 @@ function countAsciiTriangles(buffer: Buffer): number {
   return matches?.length ?? 0;
 }
 
-function sanitiseFilename(name: string): string {
-  const base = name.replace(FILENAME_SANITISE_RE, '_').replace(/^_+|_+$/g, '');
-  const cut = base.slice(0, 120);
-  return cut.length > 0 ? cut : 'model.stl';
-}
-
 export interface UploadStlOptions {
   filename: string;
   buffer: Buffer;
@@ -94,7 +87,7 @@ export class StlService {
     const triangleCount =
       format === 'binary' ? buffer.readUInt32LE(80) : countAsciiTriangles(buffer);
 
-    const cleanName = sanitiseFilename(filename);
+    const cleanName = sanitiseFilename(filename, 'model.stl');
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const metadata: StlMetadata = { format, triangleCount };
 

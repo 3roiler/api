@@ -2,6 +2,7 @@ import type { PoolClient, QueryResult } from 'pg';
 import { createHash } from 'node:crypto';
 import persistence from './persistence.js';
 import AppError from './error.js';
+import { sanitiseFilename } from './file-helpers.js';
 import type { GcodeFile, GcodeMetadata } from '../models/index.js';
 
 /**
@@ -18,7 +19,6 @@ const GCODE_COLUMNS = `
   gf.created_at AS "createdAt"
 `;
 
-const FILENAME_SANITISE_RE = /[^a-zA-Z0-9._-]+/g;
 const GCODE_MAGIC_RE = /^[GM]\d+/m;
 
 export interface UploadGcodeOptions {
@@ -41,17 +41,6 @@ function assertGcodeMagic(buffer: Buffer): void {
       'BAD_GCODE_MAGIC'
     );
   }
-}
-
-/**
- * Collapses filesystem-unsafe characters so we can safely echo the
- * filename into logs, file-shares, or Moonraker. Keeps letters, digits,
- * `.`, `_`, `-`. Empty results fall back to `print.gcode`.
- */
-function sanitiseFilename(name: string): string {
-  const base = name.replace(FILENAME_SANITISE_RE, '_').replace(/^_+|_+$/g, '');
-  const cut = base.slice(0, 120);
-  return cut.length > 0 ? cut : 'print.gcode';
 }
 
 /**
@@ -109,7 +98,7 @@ export class GcodeService {
 
     assertGcodeMagic(buffer);
 
-    const cleanName = sanitiseFilename(filename);
+    const cleanName = sanitiseFilename(filename, 'print.gcode');
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const metadata = parseMetadata(buffer);
 
