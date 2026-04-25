@@ -1,23 +1,8 @@
-import type { PoolClient, QueryResult } from 'pg';
 import { createHash } from 'node:crypto';
-import persistence from './persistence.js';
 import AppError from './error.js';
 import { sanitiseFilename } from './file-helpers.js';
+import { createAssetStore } from './asset-store.js';
 import type { GcodeFile, GcodeMetadata } from '../models/index.js';
-
-/**
- * Metadata columns (no bytea). Bytea lives in `gcode_file_content` —
- * never JOINed for list/detail, only when the agent fetches the file.
- */
-const GCODE_COLUMNS = `
-  gf.id,
-  gf.uploaded_by_user_id AS "uploadedByUserId",
-  gf.original_filename AS "originalFilename",
-  gf.sha256,
-  gf.size_bytes AS "sizeBytes",
-  gf.metadata,
-  gf.created_at AS "createdAt"
-`;
 
 const GCODE_MAGIC_RE = /^[GM]\d+/m;
 
@@ -86,12 +71,21 @@ function parseMetadata(buffer: Buffer): GcodeMetadata {
   return md;
 }
 
+const store = createAssetStore<GcodeFile>({
+  table: 'gcode_file',
+  contentTable: 'gcode_file_content'
+});
+
 export class GcodeService {
   /**
-   * Validates, hashes, parses metadata, and writes both the metadata
-   * row and the bytea blob atomically. Deduplicates on `sha256`: if the
-   * same file was already uploaded, returns the existing row instead
-   * of creating a duplicate content blob.
+   * Validates G-code magic bytes, parses slicer metadata,
+   * deduplicates by SHA-256 and stores the bytea atomically. Identical
+   * re-upload returns the existing row — no new content blob written.
+   *
+   * Owner attribution: the FIRST uploader of a given hash keeps the
+   * row. Later uploaders just hit dedup and never get authorship.
+   * Same behaviour as STL — dedup wins over attribution because the
+   * content is identical anyway.
    */
   async uploadGcode(options: UploadGcodeOptions): Promise<GcodeFile> {
     const { filename, buffer, uploadedByUserId } = options;
@@ -102,99 +96,30 @@ export class GcodeService {
     const sha256 = createHash('sha256').update(buffer).digest('hex');
     const metadata = parseMetadata(buffer);
 
-    return this.withTx(async (client) => {
-      // Dedup by hash. Owner can differ (A uploads `bracket.gcode`,
-      // later B uploads the same bits) — we honour the first uploader
-      // for attribution and skip the bytea round-trip.
-      const existing: QueryResult<GcodeFile> = await client.query(
-        `SELECT ${GCODE_COLUMNS} FROM public."gcode_file" gf WHERE gf.sha256 = $1`,
-        [sha256]
-      );
-      if (existing.rows[0]) {
-        return existing.rows[0];
-      }
-
-      const inserted = await client.query<{ id: string }>(
-        `INSERT INTO public."gcode_file"
-           (uploaded_by_user_id, original_filename, sha256, size_bytes, metadata)
-         VALUES ($1::uuid, $2, $3, $4, $5::jsonb)
-         RETURNING id`,
-        [uploadedByUserId, cleanName, sha256, buffer.length, JSON.stringify(metadata)]
-      );
-      const fileId = inserted.rows[0].id;
-
-      await client.query(
-        `INSERT INTO public."gcode_file_content" (file_id, content)
-         VALUES ($1::uuid, $2)`,
-        [fileId, buffer]
-      );
-
-      const fresh: QueryResult<GcodeFile> = await client.query(
-        `SELECT ${GCODE_COLUMNS} FROM public."gcode_file" gf WHERE gf.id = $1::uuid`,
-        [fileId]
-      );
-      return fresh.rows[0];
+    return store.withTx(async (client) => {
+      const existing = await store.findBySha256(client, sha256);
+      if (existing) return existing;
+      return store.insertContent(client, {
+        uploadedByUserId,
+        filename: cleanName,
+        sha256,
+        sizeBytes: buffer.length,
+        metadata,
+        content: buffer
+      });
     });
   }
 
-  async listForUser(userId: string, limit = 50, offset = 0): Promise<GcodeFile[]> {
-    const result: QueryResult<GcodeFile> = await persistence.database.query(
-      `SELECT ${GCODE_COLUMNS}
-       FROM public."gcode_file" gf
-       WHERE gf.uploaded_by_user_id = $1::uuid
-       ORDER BY gf.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    );
-    return result.rows;
-  }
-
-  async getById(id: string): Promise<GcodeFile | null> {
-    const result: QueryResult<GcodeFile> = await persistence.database.query(
-      `SELECT ${GCODE_COLUMNS} FROM public."gcode_file" gf WHERE gf.id = $1::uuid`,
-      [id]
-    );
-    return result.rows[0] ?? null;
-  }
-
-  /**
-   * Loads the binary content. Only called by the agent via a short-TTL
-   * download ticket — user-facing endpoints never stream the bytea blob.
-   */
-  async getContent(id: string): Promise<Buffer | null> {
-    const result: QueryResult<{ content: Buffer }> = await persistence.database.query(
-      `SELECT content FROM public."gcode_file_content" WHERE file_id = $1::uuid`,
-      [id]
-    );
-    return result.rows[0]?.content ?? null;
-  }
-
-  async deleteGcode(id: string): Promise<boolean> {
-    // ON DELETE CASCADE wipes gcode_file_content; RESTRICT on print_job
-    // guards against nuking a file that still has historical jobs
-    // referencing it (Postgres will surface a 23503 → 409 in the
-    // controller).
-    const result = await persistence.database.query(
-      `DELETE FROM public."gcode_file" WHERE id = $1::uuid`,
-      [id]
-    );
-    return (result.rowCount ?? 0) > 0;
-  }
-
-  private async withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
-    const client = await persistence.database.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await fn(client);
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
+  // The plain CRUD now lives in the store factory — these are thin
+  // arrow re-exports so existing callers keep their imports.
+  // ON DELETE CASCADE wipes the content row; the print_job FK uses
+  // RESTRICT, so the controller surfaces 23503 → 409 if the file is
+  // still referenced.
+  listForUser = (userId: string, limit = 50, offset = 0): Promise<GcodeFile[]> =>
+    store.list(userId, limit, offset);
+  getById = (id: string): Promise<GcodeFile | null> => store.getById(id);
+  getContent = (id: string): Promise<Buffer | null> => store.getContent(id);
+  deleteGcode = (id: string): Promise<boolean> => store.delete(id);
 }
 
 export default new GcodeService();

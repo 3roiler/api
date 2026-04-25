@@ -2,16 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { gcode as gcodeService } from '../services/index.js';
 import config from '../services/config.js';
 import AppError from '../services/error.js';
-
-const FILENAME_HEADER = 'x-filename';
-const FILENAME_MAX = 255;
-
-function requireUser(req: Request): string {
-  if (!req.userId) {
-    throw AppError.unauthorized('No authenticated user.');
-  }
-  return req.userId;
-}
+import { requireUser, requireRawBuffer, requireFilenameHeader } from './asset-controller.js';
 
 /**
  * Accepts a raw G-code body (`Content-Type: application/octet-stream`)
@@ -24,31 +15,12 @@ function requireUser(req: Request): string {
 const uploadGcode = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = requireUser(req);
-
-    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-      return next(AppError.badRequest(
-        'Request body must be the raw G-code bytes (Content-Type: application/octet-stream).',
-        'EMPTY_BODY'
-      ));
-    }
-    if (req.body.length > config.gcodeMaxBytes) {
-      return next(AppError.badRequest(
-        `G-Code überschreitet Limit (${config.gcodeMaxBytes} Bytes).`,
-        'FILE_TOO_LARGE'
-      ));
-    }
-
-    const headerName = req.header(FILENAME_HEADER);
-    if (!headerName || typeof headerName !== 'string' || headerName.length === 0 || headerName.length > FILENAME_MAX) {
-      return next(AppError.badRequest(
-        `Header \`X-Filename\` (1–${FILENAME_MAX} Zeichen) fehlt.`,
-        'MISSING_FILENAME'
-      ));
-    }
+    const buffer = requireRawBuffer(req, config.gcodeMaxBytes, 'G-Code');
+    const headerName = requireFilenameHeader(req);
 
     const file = await gcodeService.uploadGcode({
       filename: headerName,
-      buffer: req.body,
+      buffer,
       uploadedByUserId: userId
     });
     return res.status(201).json(file);
@@ -74,9 +46,9 @@ const getById = async (req: Request<{ id: string }>, res: Response, next: NextFu
     const userId = requireUser(req);
     const { id } = req.params;
     const file = await gcodeService.getById(id);
-    if (!file || file.uploadedByUserId !== userId) {
-      // Uploader-scoped for now; sharing flows land with the printer
-      // ACL in Phase 5.
+    // Uploader-scoped for now; sharing flows land with the printer
+    // ACL in Phase 5.
+    if (file?.uploadedByUserId !== userId) {
       return next(AppError.notFound('G-code not found', 'GCODE_NOT_FOUND'));
     }
     return res.status(200).json(file);
@@ -99,7 +71,7 @@ const getContent = async (req: Request<{ id: string }>, res: Response, next: Nex
     const userId = requireUser(req);
     const { id } = req.params;
     const meta = await gcodeService.getById(id);
-    if (!meta || meta.uploadedByUserId !== userId) {
+    if (meta?.uploadedByUserId !== userId) {
       return next(AppError.notFound('G-code not found', 'GCODE_NOT_FOUND'));
     }
     const buf = await gcodeService.getContent(id);
@@ -120,7 +92,7 @@ const deleteGcode = async (req: Request<{ id: string }>, res: Response, next: Ne
     const userId = requireUser(req);
     const { id } = req.params;
     const file = await gcodeService.getById(id);
-    if (!file || file.uploadedByUserId !== userId) {
+    if (file?.uploadedByUserId !== userId) {
       return next(AppError.notFound('G-code not found', 'GCODE_NOT_FOUND'));
     }
 
