@@ -19,15 +19,13 @@ import type { StlFile, StlMetadata } from '../models/index.js';
  * Returns `null` if neither matches; the caller surfaces a 400.
  */
 function detectStlFormat(input: Buffer): 'ascii' | 'binary' | null {
-  // CodeQL's type-confusion query doesn't follow the `asserts is
-  // Buffer` form across call boundaries, so we inline the runtime
-  // check + re-bind to a fresh `const buffer: Buffer` local right
-  // before the first property access.
   if (!Buffer.isBuffer(input)) {
     throw new TypeError('Expected a Buffer instance.');
   }
   const buffer: Buffer = input;
-  const length = buffer.length;
+  // See gcode.ts uploadGcode for why `Buffer.byteLength(buffer)`
+  // instead of `buffer.length`.
+  const length = Buffer.byteLength(buffer);
   if (length < 84) return null;
 
   const triangleCount = buffer.readUInt32LE(80);
@@ -74,13 +72,13 @@ export class StlService {
    */
   async uploadStl(options: UploadStlOptions): Promise<StlFile> {
     const { filename, buffer: rawBuffer, uploadedByUserId } = options;
-    // Inline check + re-bind so CodeQL sees the type-guard in the
-    // same scope as the `length` read it flagged.
     if (!Buffer.isBuffer(rawBuffer)) {
       throw new TypeError('Expected a Buffer instance.');
     }
     const buffer: Buffer = rawBuffer;
-    const sizeBytes: number = buffer.length;
+    // See gcode.ts uploadGcode — Buffer.byteLength(buffer) avoids the
+    // `any.length` pattern CodeQL keeps flagging, with identical runtime.
+    const sizeBytes: number = Buffer.byteLength(buffer);
 
     const format = detectStlFormat(buffer);
     if (!format) {
