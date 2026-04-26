@@ -66,8 +66,21 @@ export function requireRawBuffer(req: Request, maxBytes: number, label: string):
 }
 
 export function requireFilenameHeader(req: Request): string {
-  const header = req.header(FILENAME_HEADER);
-  if (typeof header !== 'string' || header.length === 0 || header.length > FILENAME_MAX) {
+  // Two-step narrowing matching `requireRawBuffer`: Express's
+  // `req.header()` is typed `string | string[] | undefined`, so the
+  // `typeof !== 'string'` guard runs first on its own, then the
+  // length checks live on a re-bound typed local. Splitting the
+  // checks keeps CodeQL's type-confusion analysis from tripping over
+  // the alternation.
+  const raw: unknown = req.header(FILENAME_HEADER);
+  if (typeof raw !== 'string') {
+    throw AppError.badRequest(
+      `Header \`X-Filename\` (1–${FILENAME_MAX} Zeichen) fehlt.`,
+      'MISSING_FILENAME'
+    );
+  }
+  const header: string = raw;
+  if (header.length === 0 || header.length > FILENAME_MAX) {
     throw AppError.badRequest(
       `Header \`X-Filename\` (1–${FILENAME_MAX} Zeichen) fehlt.`,
       'MISSING_FILENAME'
