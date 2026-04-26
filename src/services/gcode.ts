@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import AppError from './error.js';
-import { sanitiseFilename, assertIsBuffer } from './file-helpers.js';
+import { sanitiseFilename, ensureBuffer } from './file-helpers.js';
 import { createAssetStore } from './asset-store.js';
 import type { GcodeFile, GcodeMetadata } from '../models/index.js';
 
@@ -18,9 +18,8 @@ export interface UploadGcodeOptions {
  * `G<digit>` / `M<digit>` line — matches every slicer we've seen (Cura,
  * PrusaSlicer, OrcaSlicer), plus hand-rolled G-code.
  */
-function assertGcodeMagic(buffer: Buffer): void {
-  // Trust boundary — see assertIsBuffer doc-comment in file-helpers.
-  assertIsBuffer(buffer);
+function assertGcodeMagic(input: Buffer): void {
+  const buffer = ensureBuffer(input);
   const probe = buffer.subarray(0, Math.min(buffer.length, 1024)).toString('utf8');
   if (!GCODE_MAGIC_RE.test(probe)) {
     throw AppError.badRequest(
@@ -35,8 +34,8 @@ function assertGcodeMagic(buffer: Buffer): void {
  * at the top of the file. Best-effort — any missing field is just left
  * off the returned object. Only the first 64 KB are scanned.
  */
-function parseMetadata(buffer: Buffer): GcodeMetadata {
-  assertIsBuffer(buffer);
+function parseMetadata(input: Buffer): GcodeMetadata {
+  const buffer = ensureBuffer(input);
   const head = buffer.subarray(0, Math.min(buffer.length, 65536)).toString('utf8');
   const md: GcodeMetadata = {};
 
@@ -91,9 +90,14 @@ export class GcodeService {
    * content is identical anyway.
    */
   async uploadGcode(options: UploadGcodeOptions): Promise<GcodeFile> {
-    const { filename, buffer, uploadedByUserId } = options;
-    assertIsBuffer(buffer);
-    const sizeBytes = buffer.length;
+    const { filename, buffer: rawBuffer, uploadedByUserId } = options;
+    // Inline check + re-bind so CodeQL sees the type-guard in the
+    // same scope as the `length` read it flagged.
+    if (!Buffer.isBuffer(rawBuffer)) {
+      throw new TypeError('Expected a Buffer instance.');
+    }
+    const buffer: Buffer = rawBuffer;
+    const sizeBytes: number = buffer.length;
 
     assertGcodeMagic(buffer);
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import AppError from './error.js';
-import { sanitiseFilename, assertIsBuffer } from './file-helpers.js';
+import { sanitiseFilename, ensureBuffer } from './file-helpers.js';
 import { createAssetStore } from './asset-store.js';
 import type { StlFile, StlMetadata } from '../models/index.js';
 
@@ -18,11 +18,15 @@ import type { StlFile, StlMetadata } from '../models/index.js';
  *
  * Returns `null` if neither matches; the caller surfaces a 400.
  */
-function detectStlFormat(buffer: Buffer): 'ascii' | 'binary' | null {
-  // Trust boundary — see assertIsBuffer doc-comment for the CodeQL
-  // backstory. The runtime check is cheap and locks the type for
-  // every subsequent `length` / `readUInt32LE` / `subarray` call.
-  assertIsBuffer(buffer);
+function detectStlFormat(input: Buffer): 'ascii' | 'binary' | null {
+  // CodeQL's type-confusion query doesn't follow the `asserts is
+  // Buffer` form across call boundaries, so we inline the runtime
+  // check + re-bind to a fresh `const buffer: Buffer` local right
+  // before the first property access.
+  if (!Buffer.isBuffer(input)) {
+    throw new TypeError('Expected a Buffer instance.');
+  }
+  const buffer: Buffer = input;
   const length = buffer.length;
   if (length < 84) return null;
 
@@ -43,8 +47,8 @@ function detectStlFormat(buffer: Buffer): 'ascii' | 'binary' | null {
  * Only scans the first 4 MB to keep the parse cheap on huge files —
  * for visualisation accuracy a sampled count is plenty.
  */
-function countAsciiTriangles(buffer: Buffer): number {
-  assertIsBuffer(buffer);
+function countAsciiTriangles(input: Buffer): number {
+  const buffer = ensureBuffer(input);
   const limit = Math.min(buffer.length, 4 * 1024 * 1024);
   const text = buffer.subarray(0, limit).toString('utf8');
   const matches = text.match(/facet normal/gi);
@@ -69,9 +73,14 @@ export class StlService {
    * returns the existing row — no new content blob written.
    */
   async uploadStl(options: UploadStlOptions): Promise<StlFile> {
-    const { filename, buffer, uploadedByUserId } = options;
-    assertIsBuffer(buffer);
-    const sizeBytes = buffer.length;
+    const { filename, buffer: rawBuffer, uploadedByUserId } = options;
+    // Inline check + re-bind so CodeQL sees the type-guard in the
+    // same scope as the `length` read it flagged.
+    if (!Buffer.isBuffer(rawBuffer)) {
+      throw new TypeError('Expected a Buffer instance.');
+    }
+    const buffer: Buffer = rawBuffer;
+    const sizeBytes: number = buffer.length;
 
     const format = detectStlFormat(buffer);
     if (!format) {

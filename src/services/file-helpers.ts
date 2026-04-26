@@ -31,19 +31,24 @@ function trimUnderscores(value: string): string {
 }
 
 /**
- * Type-narrowing assertion. Re-checks `Buffer.isBuffer` even though
- * the caller's TypeScript signature already declares `Buffer`. The
- * upload data ultimately originates from `req.body` (Express types
- * that as `any`), and CodeQL flags every later `buffer.X` access as
- * "possible type-confusion through parameter tampering" unless we
- * add an explicit runtime check inside each scope. Using an
- * `asserts`-typed function lets a single line clear the warning at
- * each entry-point without duplicating the if/throw boilerplate.
+ * Returns the value re-typed as `Buffer` after a runtime check, so the
+ * caller can re-bind into a fresh local. The upload data ultimately
+ * originates from `req.body` (Express types it as `any`); CodeQL's
+ * type-confusion query needs every later `buffer.X` access to live
+ * in a scope where the type was explicitly verified.
+ *
+ * Returning instead of using an `asserts`-typed function is
+ * deliberate: CodeQL doesn't follow `asserts` annotations across
+ * call boundaries, so a `const buffer = ensureBuffer(raw)` re-bind
+ * is what actually clears the warning. Hot-spot call sites that
+ * still trip the analyser keep an inline `Buffer.isBuffer` check
+ * directly above the read.
  */
-export function assertIsBuffer(value: unknown): asserts value is Buffer {
+export function ensureBuffer(value: unknown): Buffer {
   if (!Buffer.isBuffer(value)) {
     throw new TypeError('Expected a Buffer instance.');
   }
+  return value;
 }
 
 /**
