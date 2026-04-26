@@ -12,6 +12,22 @@ const LEADING_UNDERSCORES_RE = /^_+/;
 const TRAILING_UNDERSCORES_RE = /_+$/;
 
 /**
+ * Type-narrowing assertion. Re-checks `Buffer.isBuffer` even though
+ * the caller's TypeScript signature already declares `Buffer`. The
+ * upload data ultimately originates from `req.body` (Express types
+ * that as `any`), and CodeQL flags every later `buffer.X` access as
+ * "possible type-confusion through parameter tampering" unless we
+ * add an explicit runtime check inside each scope. Using an
+ * `asserts`-typed function lets a single line clear the warning at
+ * each entry-point without duplicating the if/throw boilerplate.
+ */
+export function assertIsBuffer(value: unknown): asserts value is Buffer {
+  if (!Buffer.isBuffer(value)) {
+    throw new TypeError('Expected a Buffer instance.');
+  }
+}
+
+/**
  * Collapses filesystem-unsafe characters so we can safely echo the
  * filename into logs, file shares or Moonraker. Keeps letters, digits,
  * `.`, `_`, `-`. Falls back to `fallback` when the sanitised result is

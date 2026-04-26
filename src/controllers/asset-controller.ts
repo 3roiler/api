@@ -28,21 +28,29 @@ export function requireUser(req: Request): string {
  * Validates the raw body of an `application/octet-stream` upload. The
  * `label` is the German noun used in the size-limit error so messages
  * read naturally ("STL überschreitet Limit").
+ *
+ * Reads `req.body` once into a local before checking. Express types
+ * the property as `any`; CodeQL flags the multi-read pattern as
+ * potential type-confusion (a tampered request could in principle
+ * yield a different shape between reads, e.g. an array on the type
+ * check and something else on the size read). Pinning to a local
+ * makes the check + use atomic.
  */
 export function requireRawBuffer(req: Request, maxBytes: number, label: string): Buffer {
-  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+  const body: unknown = req.body;
+  if (!Buffer.isBuffer(body) || body.length === 0) {
     throw AppError.badRequest(
       `Request body must be the raw ${label} bytes (Content-Type: application/octet-stream).`,
       'EMPTY_BODY'
     );
   }
-  if (req.body.length > maxBytes) {
+  if (body.length > maxBytes) {
     throw AppError.badRequest(
       `${label} überschreitet Limit (${maxBytes} Bytes).`,
       'FILE_TOO_LARGE'
     );
   }
-  return req.body;
+  return body;
 }
 
 export function requireFilenameHeader(req: Request): string {

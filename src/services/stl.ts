@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import AppError from './error.js';
-import { sanitiseFilename } from './file-helpers.js';
+import { sanitiseFilename, assertIsBuffer } from './file-helpers.js';
 import { createAssetStore } from './asset-store.js';
 import type { StlFile, StlMetadata } from '../models/index.js';
 
@@ -19,10 +19,15 @@ import type { StlFile, StlMetadata } from '../models/index.js';
  * Returns `null` if neither matches; the caller surfaces a 400.
  */
 function detectStlFormat(buffer: Buffer): 'ascii' | 'binary' | null {
-  if (buffer.length < 84) return null;
+  // Trust boundary — see assertIsBuffer doc-comment for the CodeQL
+  // backstory. The runtime check is cheap and locks the type for
+  // every subsequent `length` / `readUInt32LE` / `subarray` call.
+  assertIsBuffer(buffer);
+  const length = buffer.length;
+  if (length < 84) return null;
 
   const triangleCount = buffer.readUInt32LE(80);
-  if (buffer.length === 84 + triangleCount * 50) {
+  if (length === 84 + triangleCount * 50) {
     return 'binary';
   }
 
@@ -39,6 +44,7 @@ function detectStlFormat(buffer: Buffer): 'ascii' | 'binary' | null {
  * for visualisation accuracy a sampled count is plenty.
  */
 function countAsciiTriangles(buffer: Buffer): number {
+  assertIsBuffer(buffer);
   const limit = Math.min(buffer.length, 4 * 1024 * 1024);
   const text = buffer.subarray(0, limit).toString('utf8');
   const matches = text.match(/facet normal/gi);
@@ -64,6 +70,8 @@ export class StlService {
    */
   async uploadStl(options: UploadStlOptions): Promise<StlFile> {
     const { filename, buffer, uploadedByUserId } = options;
+    assertIsBuffer(buffer);
+    const sizeBytes = buffer.length;
 
     const format = detectStlFormat(buffer);
     if (!format) {
@@ -87,7 +95,7 @@ export class StlService {
         uploadedByUserId,
         filename: cleanName,
         sha256,
-        sizeBytes: buffer.length,
+        sizeBytes,
         metadata,
         content: buffer
       });

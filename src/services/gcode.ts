@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import AppError from './error.js';
-import { sanitiseFilename } from './file-helpers.js';
+import { sanitiseFilename, assertIsBuffer } from './file-helpers.js';
 import { createAssetStore } from './asset-store.js';
 import type { GcodeFile, GcodeMetadata } from '../models/index.js';
 
@@ -19,6 +19,8 @@ export interface UploadGcodeOptions {
  * PrusaSlicer, OrcaSlicer), plus hand-rolled G-code.
  */
 function assertGcodeMagic(buffer: Buffer): void {
+  // Trust boundary — see assertIsBuffer doc-comment in file-helpers.
+  assertIsBuffer(buffer);
   const probe = buffer.subarray(0, Math.min(buffer.length, 1024)).toString('utf8');
   if (!GCODE_MAGIC_RE.test(probe)) {
     throw AppError.badRequest(
@@ -34,6 +36,7 @@ function assertGcodeMagic(buffer: Buffer): void {
  * off the returned object. Only the first 64 KB are scanned.
  */
 function parseMetadata(buffer: Buffer): GcodeMetadata {
+  assertIsBuffer(buffer);
   const head = buffer.subarray(0, Math.min(buffer.length, 65536)).toString('utf8');
   const md: GcodeMetadata = {};
 
@@ -89,6 +92,8 @@ export class GcodeService {
    */
   async uploadGcode(options: UploadGcodeOptions): Promise<GcodeFile> {
     const { filename, buffer, uploadedByUserId } = options;
+    assertIsBuffer(buffer);
+    const sizeBytes = buffer.length;
 
     assertGcodeMagic(buffer);
 
@@ -103,7 +108,7 @@ export class GcodeService {
         uploadedByUserId,
         filename: cleanName,
         sha256,
-        sizeBytes: buffer.length,
+        sizeBytes,
         metadata,
         content: buffer
       });
