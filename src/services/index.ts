@@ -13,7 +13,9 @@ import settings from './settings';
 import metrics from './metrics';
 import printer from './printer';
 import printJob from './print-job';
+import printRequest from './print-request';
 import gcode from './gcode';
+import stl from './stl';
 
 export {
   config,
@@ -31,5 +33,7 @@ export {
   metrics,
   printer,
   printJob,
-  gcode
+  printRequest,
+  gcode,
+  stl
 };
