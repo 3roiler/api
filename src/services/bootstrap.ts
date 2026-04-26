@@ -29,7 +29,12 @@ const ADMIN_PERMISSIONS = [
   'dashboard.groups',
   'dashboard.settings',
   'dashboard.metrics',
-  'dashboard.printers'
+  'dashboard.printers',
+  // Print-request flow: admins can both submit and moderate. Friends
+  // who should only submit get `print.request` granted manually via
+  // the admin UI.
+  'print.request',
+  'print.moderate'
 ] as const;
 
 /**

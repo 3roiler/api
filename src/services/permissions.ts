@@ -25,7 +25,13 @@ export const PERMISSIONS: readonly PermissionDefinition[] = [
   { key: 'dashboard.groups', description: 'Group management section of the dashboard.' },
   { key: 'dashboard.settings', description: 'Site configuration section (tokens, feature flags).' },
   { key: 'dashboard.metrics', description: 'DigitalOcean / database metrics proxy.' },
-  { key: 'dashboard.printers', description: '3D-Drucker und G-Code-Dateien verwalten.' }
+  { key: 'dashboard.printers', description: '3D-Drucker und G-Code-Dateien verwalten.' },
+  // Print-Request flow lives next to the printer permissions but is
+  // its own track — `print.request` lets a friend submit a print
+  // ticket from the public-side header link, `print.moderate` lets
+  // the owner manage the queue, change status, assign a printer.
+  { key: 'print.request', description: 'Druckanfragen stellen und eigene verfolgen.' },
+  { key: 'print.moderate', description: 'Alle Druckanfragen verwalten, Status setzen, Drucker zuweisen.' }
 ] as const;
 
 const PERMISSION_KEYS = new Set(PERMISSIONS.map(p => p.key));
