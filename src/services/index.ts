@@ -13,6 +13,7 @@ import settings from './settings';
 import metrics from './metrics';
 import printer from './printer';
 import printJob from './print-job';
+import printRequest from './print-request';
 import gcode from './gcode';
 import stl from './stl';
 
@@ -32,6 +33,7 @@ export {
   metrics,
   printer,
   printJob,
+  printRequest,
   gcode,
   stl
 };

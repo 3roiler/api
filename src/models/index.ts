@@ -240,3 +240,65 @@ export interface StlFile {
   metadata: StlMetadata;
   createdAt: Date;
 }
+
+// ─── Print-Request ─────────────────────────────────────────────────────────
+
+export type PrintRequestStatus =
+  | 'new'
+  | 'accepted'
+  | 'printing'
+  | 'done'
+  | 'rejected'
+  | 'cancelled';
+
+export type PrintRequestSourceType = 'stl_upload' | 'external_link';
+
+/**
+ * A human-to-human ticket: someone asks the printer-owner to print
+ * something. Independent of the agent / print_job pipeline so it
+ * works even when nothing is automated yet (USB-stick fulfilment is
+ * a valid use case).
+ */
+export interface PrintRequest {
+  id: UUID;
+  requesterUserId: UUID;
+  title: string;
+  description: string | null;
+  sourceType: PrintRequestSourceType;
+  /** Set when sourceType === 'stl_upload'. */
+  stlFileId: UUID | null;
+  /** Set when sourceType === 'external_link'. */
+  externalUrl: string | null;
+  /** Filled by the moderator once a printer is picked. */
+  assignedPrinterId: UUID | null;
+  status: PrintRequestStatus;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+/**
+ * `PrintRequest` joined with the bits the UI always needs alongside it
+ * (requester display, optional STL filename, optional printer name).
+ * Spares the frontend a fan-out of follow-up calls per row.
+ */
+export interface PrintRequestWithContext extends PrintRequest {
+  requesterName: string;
+  requesterDisplayName: string | null;
+  requesterAvatarUrl: string | null;
+  stlFilename: string | null;
+  printerName: string | null;
+}
+
+export interface PrintRequestComment {
+  id: UUID;
+  requestId: UUID;
+  authorUserId: UUID;
+  body: string;
+  createdAt: Date;
+}
+
+export interface PrintRequestCommentWithAuthor extends PrintRequestComment {
+  authorName: string;
+  authorDisplayName: string | null;
+  authorAvatarUrl: string | null;
+}
