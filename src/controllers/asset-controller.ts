@@ -37,20 +37,32 @@ export function requireUser(req: Request): string {
  * makes the check + use atomic.
  */
 export function requireRawBuffer(req: Request, maxBytes: number, label: string): Buffer {
+  // Two-step narrowing keeps CodeQL happy: the `||` form was still
+  // flagged because the analyser couldn't follow the type-guard
+  // through the alternation. Splitting the type-check from the
+  // length-check, then re-binding into a typed `const buffer`, makes
+  // each branch unambiguously about a verified Buffer.
   const body: unknown = req.body;
-  if (!Buffer.isBuffer(body) || body.length === 0) {
+  if (!Buffer.isBuffer(body)) {
     throw AppError.badRequest(
       `Request body must be the raw ${label} bytes (Content-Type: application/octet-stream).`,
       'EMPTY_BODY'
     );
   }
-  if (body.length > maxBytes) {
+  const buffer: Buffer = body;
+  if (buffer.length === 0) {
+    throw AppError.badRequest(
+      `Request body must be the raw ${label} bytes (Content-Type: application/octet-stream).`,
+      'EMPTY_BODY'
+    );
+  }
+  if (buffer.length > maxBytes) {
     throw AppError.badRequest(
       `${label} überschreitet Limit (${maxBytes} Bytes).`,
       'FILE_TOO_LARGE'
     );
   }
-  return body;
+  return buffer;
 }
 
 export function requireFilenameHeader(req: Request): string {
