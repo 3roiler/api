@@ -8,6 +8,7 @@ import admin from './admin.js';
 import printer from './printer.js';
 import gcode from './gcode.js';
 import stl from './stl.js';
+import printRequest from './print-request.js';
 import agent from './agent.js';
 
 const router = Router();
@@ -41,6 +42,8 @@ router.use('/user', system.authHandler, user);
 router.use('/printer', system.authHandler, printer);
 router.use('/gcode', system.authHandler, gcode);
 router.use('/stl', system.authHandler, stl);
+// Print-Request gates inside the router itself (auth + print.request).
+router.use('/print-request', printRequest);
 
 // Agent routes authenticate via `X-Agent-Token` inside the router — not
 // via the user JWT middleware. Mount path is intentionally short because
