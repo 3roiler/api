@@ -14,28 +14,55 @@ import type {
  * Print-Request service.
  *
  * Two query layers:
- *   - "compact" (`PRINT_REQUEST_COLUMNS`) for endpoints that don't
- *     need the requester / STL / printer names.
+ *   - "compact" (`printRequestCols`) for endpoints that don't need
+ *     the requester / STL / printer names.
  *   - "with context" (`PRINT_REQUEST_COLUMNS_CTX`) for the list and
  *     detail views — joins user + stl_file + printer to spare the
  *     frontend N+1 lookups.
+ *
+ * Column projections are produced via tiny helpers so the same column
+ * list works in three contexts:
+ *   - SELECT with `FROM print_request pr` (alias = 'pr')
+ *   - INSERT ... RETURNING (no FROM, alias must be empty)
+ *   - UPDATE ... RETURNING (no AS alias on the table by default,
+ *     so again unaliased)
+ *
+ * The original code used a hard-coded `pr.` prefix everywhere and
+ * blew up on the INSERT path with `missing FROM-clause entry for
+ * table "pr"` (Postgres 42P01).
  */
-const PRINT_REQUEST_COLUMNS = `
-  pr.id,
-  pr.requester_user_id AS "requesterUserId",
-  pr.title,
-  pr.description,
-  pr.source_type AS "sourceType",
-  pr.stl_file_id AS "stlFileId",
-  pr.external_url AS "externalUrl",
-  pr.assigned_printer_id AS "assignedPrinterId",
-  pr.status,
-  pr.created_at AS "createdAt",
-  pr.updated_at AS "updatedAt"
-`;
+const prefix = (alias: string) => (alias ? `${alias}.` : '');
+
+function printRequestCols(alias = ''): string {
+  const p = prefix(alias);
+  return `
+    ${p}id,
+    ${p}requester_user_id AS "requesterUserId",
+    ${p}title,
+    ${p}description,
+    ${p}source_type AS "sourceType",
+    ${p}stl_file_id AS "stlFileId",
+    ${p}external_url AS "externalUrl",
+    ${p}assigned_printer_id AS "assignedPrinterId",
+    ${p}status,
+    ${p}created_at AS "createdAt",
+    ${p}updated_at AS "updatedAt"
+  `;
+}
+
+function commentCols(alias = ''): string {
+  const p = prefix(alias);
+  return `
+    ${p}id,
+    ${p}request_id AS "requestId",
+    ${p}author_user_id AS "authorUserId",
+    ${p}body,
+    ${p}created_at AS "createdAt"
+  `;
+}
 
 const PRINT_REQUEST_COLUMNS_CTX = `
-  ${PRINT_REQUEST_COLUMNS},
+  ${printRequestCols('pr')},
   u.name AS "requesterName",
   u.display_name AS "requesterDisplayName",
   u.avatar_url AS "requesterAvatarUrl",
@@ -43,16 +70,8 @@ const PRINT_REQUEST_COLUMNS_CTX = `
   p.name AS "printerName"
 `;
 
-const COMMENT_COLUMNS = `
-  c.id,
-  c.request_id AS "requestId",
-  c.author_user_id AS "authorUserId",
-  c.body,
-  c.created_at AS "createdAt"
-`;
-
 const COMMENT_COLUMNS_CTX = `
-  ${COMMENT_COLUMNS},
+  ${commentCols('c')},
   u.name AS "authorName",
   u.display_name AS "authorDisplayName",
   u.avatar_url AS "authorAvatarUrl"
@@ -129,7 +148,7 @@ export class PrintRequestService {
       `INSERT INTO public."print_request"
          (requester_user_id, title, description, source_type, stl_file_id, external_url)
        VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6)
-       RETURNING ${PRINT_REQUEST_COLUMNS}`,
+       RETURNING ${printRequestCols()}`,
       [requesterUserId, title, description, source.type, stlFileId, externalUrl]
     );
     return result.rows[0];
@@ -236,7 +255,7 @@ export class PrintRequestService {
       `UPDATE public."print_request"
        SET ${sets.join(', ')}
        WHERE id = $${values.length}::uuid
-       RETURNING ${PRINT_REQUEST_COLUMNS}`,
+       RETURNING ${printRequestCols()}`,
       values
     );
     return result.rows[0];
@@ -263,7 +282,7 @@ export class PrintRequestService {
       `UPDATE public."print_request"
        SET status = 'cancelled', updated_at = NOW()
        WHERE id = $1::uuid
-       RETURNING ${PRINT_REQUEST_COLUMNS}`,
+       RETURNING ${printRequestCols()}`,
       [id]
     );
     return result.rows[0];
@@ -298,7 +317,7 @@ export class PrintRequestService {
     const result: QueryResult<PrintRequestComment> = await persistence.database.query(
       `INSERT INTO public."print_request_comment" (request_id, author_user_id, body)
        VALUES ($1::uuid, $2::uuid, $3)
-       RETURNING ${COMMENT_COLUMNS}`,
+       RETURNING ${commentCols()}`,
       [requestId, authorUserId, body]
     );
     return result.rows[0];
