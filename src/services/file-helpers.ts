@@ -8,8 +8,27 @@
  */
 
 const FILENAME_SANITISE_RE = /[^a-zA-Z0-9._-]+/g;
-const LEADING_UNDERSCORES_RE = /^_+/;
-const TRAILING_UNDERSCORES_RE = /_+$/;
+const UNDERSCORE_CHAR_CODE = 0x5f; // '_'
+
+/**
+ * Strips leading and trailing `_` characters with two index walks.
+ * Replaces the previous `/^_+/` + `/_+$/` regex pair: both forms are
+ * anchored linear scans in practice, but SonarCloud's super-linear-
+ * runtime hotspot heuristic flagged the `+` quantifier — and hand-
+ * rolled boundaries are simply immune by construction. Bonus: no
+ * regex engine spin-up for the sanitiser hot path.
+ */
+function trimUnderscores(value: string): string {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) === UNDERSCORE_CHAR_CODE) {
+    start++;
+  }
+  let end = value.length;
+  while (end > start && value.charCodeAt(end - 1) === UNDERSCORE_CHAR_CODE) {
+    end--;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
 
 /**
  * Type-narrowing assertion. Re-checks `Buffer.isBuffer` even though
@@ -47,12 +66,10 @@ export function sanitiseFilename(name: string, fallback: string): string {
   // `replaceAll` instead of `replace` for the sanitise pass: signals
   // intent (we're collapsing every match, not just the first) and
   // keeps SonarCloud's "prefer replaceAll" warning quiet. Leading /
-  // trailing strips stay on `replace` because their anchors guarantee
-  // a single match.
-  const cleaned = bounded
-    .replaceAll(FILENAME_SANITISE_RE, '_')
-    .replace(LEADING_UNDERSCORES_RE, '')
-    .replace(TRAILING_UNDERSCORES_RE, '');
+  // trailing underscore strip uses `trimUnderscores` (hand-rolled, no
+  // regex) so SonarCloud's super-linear-runtime heuristic has no
+  // surface to flag.
+  const cleaned = trimUnderscores(bounded.replaceAll(FILENAME_SANITISE_RE, '_'));
   const cut = cleaned.slice(0, 120);
   return cut.length > 0 ? cut : fallback;
 }
