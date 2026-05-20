@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { system } from '../services';
 import { csrfTokenHandler } from '../middleware/csrf.js';
 import ogController from '../controllers/og.js';
+import sitemapController from '../controllers/sitemap.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -36,6 +37,9 @@ router.get(
 // CSRF: das SPA holt hier sein Token (Body) und echo't es per X-CSRF-Token.
 // Öffentlich + ohne Seiteneffekt; das Token-Cookie setzt der globale Guard.
 router.get('/csrf', csrfTokenHandler);
+
+// Dynamische sitemap.xml (Caddy proxyt /sitemap.xml hierher). Öffentlich.
+router.get('/sitemap.xml', sitemapController.sitemap);
 
 // Open-Graph für Social-Crawler (Caddy leitet nur Crawler-UAs hierher um).
 // Öffentlich + nur lesend; rendert serverseitig Meta-Tags für teilbare Seiten.
