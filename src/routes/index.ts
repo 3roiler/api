@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { system } from '../services';
+import { csrfTokenHandler } from '../middleware/csrf.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -30,6 +31,10 @@ router.get(
     res.status(healthState.ready ? 200 : 503).json(healthState);
   }
 );
+
+// CSRF: das SPA holt hier sein Token (Body) und echo't es per X-CSRF-Token.
+// Öffentlich + ohne Seiteneffekt; das Token-Cookie setzt der globale Guard.
+router.get('/csrf', csrfTokenHandler);
 
 router.post('/login', system.loginHandler);
 router.post('/register', system.registerHandler);

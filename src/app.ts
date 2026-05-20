@@ -12,20 +12,31 @@ app.set('trust proxy', 1);
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// CORS mit Cookie-Auth (credentials) verträgt KEIN Wildcard '*' — der
-// Browser blockt dann jeden Request. Daher:
+// CORS mit Cookie-Auth (credentials) verträgt KEIN Wildcard '*' und kein
+// bedingungsloses Origin-Reflektieren (`origin: true`) — beides ist mit
+// credentials unsicher und wird von CodeQL (js/cors-permissive-configuration)
+// markiert. Stattdessen validiert eine Funktion gegen eine Whitelist:
 //   - CORS_ORIGIN gesetzt: kommagetrennte Whitelist (Prod: https://broiler.dev).
-//   - sonst im Dev: Request-Origin reflektieren (`true`), damit der
-//     Vite-Dev-Server (localhost:5173 bzw. die --host Netzwerk-IP)
-//     authentifizierte Calls machen kann.
+//   - sonst im Dev: nur lokale localhost/LAN-Origins (Vite-Dev-Server,
+//     --host Netzwerk-IP) — gerade so weit offen wie nötig.
 //   - sonst in Prod: kein Cross-Origin (sicher; bitte CORS_ORIGIN setzen).
-const corsOrigin =
+const corsWhitelist =
   config.corsOrigin && config.corsOrigin !== '*'
     ? config.corsOrigin.split(',').map((o) => o.trim())
-    : !config.isProduction;
+    : [];
+const DEV_ORIGIN_RE =
+  /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|(?:\d{1,3}\.){3}\d{1,3})(?::\d+)?$/;
 app.use(cors({
-  origin: corsOrigin,
-  credentials: true
+  credentials: true,
+  origin(origin, callback) {
+    // Kein Origin-Header: Same-Origin oder Nicht-Browser-Client → erlauben.
+    if (!origin) return callback(null, true);
+    if (corsWhitelist.includes(origin)) return callback(null, true);
+    if (!config.isProduction && corsWhitelist.length === 0 && DEV_ORIGIN_RE.test(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  }
 }));
 
 // CSRF: Origin-Validierung für mutierende, Cookie-authentifizierte Requests
