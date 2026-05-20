@@ -29,4 +29,8 @@ router.patch('/reports/:id', clipAdminController.resolveReport);
 router.get('/categories', clipAdminController.listCategories);
 router.patch('/categories/:id', clipAdminController.setCategorySection);
 
+// Eingangsprüfung-Einstellungen (Tageslimit, Review-Toggle, Sektionen)
+router.get('/moderation-settings', clipAdminController.getModerationSettings);
+router.put('/moderation-settings', clipAdminController.updateModerationSettings);
+
 export default router;

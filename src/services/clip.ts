@@ -3,6 +3,7 @@ import persistence from './persistence.js';
 import AppError from './error.js';
 import twitchClip, { parseClipId } from './twitch-clip.js';
 import awardCategory from './award-category.js';
+import settings from './settings.js';
 import type {
   Clip,
   ClipAwardTally,
@@ -99,7 +100,8 @@ export interface LeaderboardOptions {
 export class ClipService {
   /**
    * Einreichen: URL/Slug parsen → Dedup → Twitch-Metadaten holen →
-   * (best effort) Kategorie auflösen → Clip als `pending` anlegen.
+   * Kategorie auflösen → Status bestimmen (Auto-Freigabe vs. Prüfung)
+   * → Clip anlegen.
    */
   async submit(userId: string, input: string): Promise<Clip> {
     const slug = parseClipId(input);
@@ -117,21 +119,24 @@ export class ClipService {
       throw AppError.notFound('Twitch kennt diesen Clip nicht.', 'CLIP_NOT_FOUND');
     }
 
-    // game_id nur setzen, wenn die Kategorie-Zeile existiert/anlegbar ist
-    // (sonst verletzt der FK). Schlägt die Auflösung fehl, bleibt der
-    // Clip kategorielos statt unspeicherbar.
-    const gameId = meta.gameId && (await this.ensureCategory(meta.gameId)) ? meta.gameId : null;
+    // Kategorie auflösen. ensureCategory liefert die Sektion zurück (oder
+    // null, wenn die Kategorie nicht auflösbar ist) — der Clip bleibt dann
+    // kategorielos statt unspeicherbar (FK).
+    const section = meta.gameId ? await this.ensureCategory(meta.gameId) : null;
+    const gameId = section !== null ? meta.gameId : null;
+
+    const status = await this.determineSubmitStatus(userId, section);
 
     const result: QueryResult<Clip> = await persistence.database.query(
       `INSERT INTO public."clip"
          (twitch_clip_id, submitted_by_user_id, title, broadcaster_id, broadcaster_name,
-          creator_name, game_id, thumbnail_url, embed_url, video_url, duration_seconds,
+          creator_name, game_id, status, thumbnail_url, embed_url, video_url, duration_seconds,
           view_count, language, clip_created_at)
-       VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING ${clipCols()}`,
       [
         slug, userId, meta.title, meta.broadcasterId, meta.broadcasterName, meta.creatorName,
-        gameId, meta.thumbnailUrl, meta.embedUrl, meta.url, meta.duration, meta.viewCount,
+        gameId, status, meta.thumbnailUrl, meta.embedUrl, meta.url, meta.duration, meta.viewCount,
         meta.language, meta.createdAt || null
       ]
     );
@@ -139,18 +144,53 @@ export class ClipService {
   }
 
   /**
-   * Stellt sicher, dass die Twitch-Kategorie in `twitch_category` liegt.
-   * `true`, wenn sie danach existiert (= game_id darf gesetzt werden).
+   * Status eines neu eingereichten Clips:
+   *   1. globaler "alles prüfen"-Toggle      → pending
+   *   2. Clip-Sektion ist review-pflichtig    → pending
+   *   3. Tageslimit erreicht (≥ N heute frei) → pending
+   *   4. sonst                                → approved
+   * Alle Werte sind über app_setting (Dashboard) konfigurierbar.
    */
-  private async ensureCategory(gameId: string): Promise<boolean> {
-    const existing = await persistence.database.query(
-      `SELECT id FROM public."twitch_category" WHERE id = $1`,
+  private async determineSubmitStatus(userId: string, section: string | null): Promise<ClipStatus> {
+    if (await settings.getSettingValue('clips.require_review_all', false)) {
+      return 'pending';
+    }
+    const reviewSections = await settings.getSettingValue<string[]>('clips.review_sections', []);
+    if (section && Array.isArray(reviewSections) && reviewSections.includes(section)) {
+      return 'pending';
+    }
+    const limit = await settings.getSettingValue('clips.auto_approve_daily_limit', 5);
+    const approvedToday = await this.countApprovedToday(userId);
+    return approvedToday < limit ? 'approved' : 'pending';
+  }
+
+  /** Anzahl heute (UTC-Tag) freigegebener Clips dieses Nutzers. */
+  private async countApprovedToday(userId: string): Promise<number> {
+    const result = await persistence.database.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count
+       FROM public."clip"
+       WHERE submitted_by_user_id = $1::uuid
+         AND status = 'approved'
+         AND created_at >= date_trunc('day', now())`,
+      [userId]
+    );
+    return result.rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Stellt sicher, dass die Twitch-Kategorie in `twitch_category` liegt.
+   * Gibt die Sektion zurück (neue Kategorien starten auf 'other'), oder
+   * null, wenn die Kategorie nicht auflösbar ist.
+   */
+  private async ensureCategory(gameId: string): Promise<string | null> {
+    const existing = await persistence.database.query<{ section: string }>(
+      `SELECT section FROM public."twitch_category" WHERE id = $1`,
       [gameId]
     );
-    if ((existing.rowCount ?? 0) > 0) return true;
+    if ((existing.rowCount ?? 0) > 0) return existing.rows[0].section;
 
     const cat = await twitchClip.fetchCategory(gameId);
-    if (!cat) return false;
+    if (!cat) return null;
 
     await persistence.database.query(
       `INSERT INTO public."twitch_category" (id, name, box_art_url)
@@ -158,7 +198,7 @@ export class ClipService {
        ON CONFLICT (id) DO NOTHING`,
       [cat.id, cat.name, cat.boxArtUrl]
     );
-    return true;
+    return 'other';
   }
 
   async getByTwitchClipId(slug: string): Promise<Clip | null> {
