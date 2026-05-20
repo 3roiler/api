@@ -16,6 +16,11 @@ import printJob from './print-job';
 import printRequest from './print-request';
 import gcode from './gcode';
 import stl from './stl';
+import twitchClip from './twitch-clip';
+import twitchCategory from './twitch-category';
+import clip from './clip';
+import clipRating from './clip-rating';
+import awardCategory from './award-category';
 
 export {
   config,
@@ -35,5 +40,10 @@ export {
   printJob,
   printRequest,
   gcode,
-  stl
+  stl,
+  twitchClip,
+  twitchCategory,
+  clip,
+  clipRating,
+  awardCategory
 };

@@ -10,6 +10,8 @@ import gcode from './gcode.js';
 import stl from './stl.js';
 import printRequest from './print-request.js';
 import agent from './agent.js';
+import clips from './clips.js';
+import categories from './categories.js';
 
 const router = Router();
 
@@ -37,6 +39,12 @@ router.use('/github', github);
 router.use('/twitch', twitch);
 router.use('/blog', blog);
 router.use('/admin', admin);
+
+// Streamclips Germany. `/clips` gated intern (Leaderboard public, Rest
+// auth + clips.submit fürs Einreichen). `/categories` ist öffentlich.
+// Die Moderations-Routen hängen unter `/admin/streamclips` (siehe admin.ts).
+router.use('/clips', clips);
+router.use('/categories', categories);
 
 router.use('/user', system.authHandler, user);
 router.use('/printer', system.authHandler, printer);

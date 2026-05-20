@@ -11,8 +11,19 @@ app.set('trust proxy', 1);
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// CORS mit Cookie-Auth (credentials) verträgt KEIN Wildcard '*' — der
+// Browser blockt dann jeden Request. Daher:
+//   - CORS_ORIGIN gesetzt: kommagetrennte Whitelist (Prod: https://broiler.dev).
+//   - sonst im Dev: Request-Origin reflektieren (`true`), damit der
+//     Vite-Dev-Server (localhost:5173 bzw. die --host Netzwerk-IP)
+//     authentifizierte Calls machen kann.
+//   - sonst in Prod: kein Cross-Origin (sicher; bitte CORS_ORIGIN setzen).
+const corsOrigin =
+  config.corsOrigin && config.corsOrigin !== '*'
+    ? config.corsOrigin.split(',').map((o) => o.trim())
+    : !config.isProduction;
 app.use(cors({
-  origin: config.corsOrigin,
+  origin: corsOrigin,
   credentials: true
 }));
 

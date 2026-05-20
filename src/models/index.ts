@@ -302,3 +302,123 @@ export interface PrintRequestCommentWithAuthor extends PrintRequestComment {
   authorDisplayName: string | null;
   authorAvatarUrl: string | null;
 }
+
+// ─── Streamclips Germany ────────────────────────────────────────────────────
+
+/**
+ * Macro-Gruppierung über die Twitch-Kategorie (Achse A). Hält die Liste
+ * synchron mit dem CHECK auf `twitch_category.section` und dem Frontend.
+ */
+export type ClipSection =
+  | 'gaming'
+  | 'just_chatting'
+  | 'irl'
+  | 'music'
+  | 'esports'
+  | 'creative'
+  | 'other';
+
+/** Moderations-Status eines Clips. Nur `approved` erscheint im Vote-Feed. */
+export type ClipStatus = 'pending' | 'approved' | 'rejected' | 'flagged';
+
+export type ClipReportStatus = 'open' | 'resolved' | 'dismissed';
+
+/**
+ * Gecachte Twitch-Kategorie (game_id) inkl. unserer Sektions-Zuordnung.
+ * `id` ist die Twitch game_id selbst.
+ */
+export interface TwitchCategory {
+  id: string;
+  name: string;
+  boxArtUrl: string | null;
+  section: ClipSection;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+/**
+ * Award-Kategorie (Achse B) — die "lustigster / bester Play / …"-Labels,
+ * die Nutzer beim Voten vergeben.
+ */
+export interface AwardCategory {
+  id: UUID;
+  key: string;
+  displayName: string;
+  description: string | null;
+  emoji: string | null;
+  color: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+export interface Clip {
+  id: UUID;
+  twitchClipId: string;
+  submittedByUserId: UUID;
+  title: string;
+  broadcasterId: string | null;
+  broadcasterName: string | null;
+  creatorName: string | null;
+  gameId: string | null;
+  thumbnailUrl: string | null;
+  embedUrl: string | null;
+  videoUrl: string | null;
+  durationSeconds: number | null;
+  viewCount: number;
+  language: string | null;
+  clipCreatedAt: Date | null;
+  status: ClipStatus;
+  rejectionReason: string | null;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+/** Award-Zählung für einen Clip (Detail-/Leaderboard-Ansicht). */
+export interface ClipAwardTally {
+  key: string;
+  displayName: string;
+  emoji: string | null;
+  color: string | null;
+  count: number;
+}
+
+/**
+ * `Clip` angereichert um die Bits, die List-/Detail-/Leaderboard-Views
+ * immer brauchen — erspart dem Frontend N+1-Lookups. Aggregat-Felder
+ * (`ratingCount`, `avgScore`, `awards`) werden im Service zu number/float
+ * gecastet (Postgres liefert COUNT/AVG als string).
+ */
+export interface ClipWithContext extends Clip {
+  submitterName: string;
+  submitterDisplayName: string | null;
+  submitterAvatarUrl: string | null;
+  categoryName: string | null;
+  section: ClipSection | null;
+  ratingCount: number;
+  avgScore: number | null;
+  awards: ClipAwardTally[];
+}
+
+export interface ClipRating {
+  id: UUID;
+  clipId: UUID;
+  userId: UUID;
+  /** 1–5, oder null bei Skip/Enthaltung. */
+  score: number | null;
+  isSkipped: boolean;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+export interface ClipReport {
+  id: UUID;
+  clipId: UUID;
+  reporterUserId: UUID;
+  reason: string;
+  status: ClipReportStatus;
+  createdAt: Date;
+  resolvedAt: Date | null;
+  resolvedBy: UUID | null;
+}
