@@ -4,30 +4,34 @@ import requirePermission from '../middleware/requirePermission.js';
 import clipController from '../controllers/clip.js';
 
 /**
- * `/api/clips` — Streamclips-Kernrouten.
+ * `/api/clips` — Streamclips-Kernrouten. Auth ist hier pro Route gesetzt
+ * (kein globales Gate), damit das öffentliche Clip-Detail nach den
+ * auth-pflichtigen statischen Pfaden stehen kann.
  *
- * `/leaderboard` liegt bewusst VOR dem Auth-Gate (öffentlich lesbar).
- * Alles danach erfordert Login; Bewerten/Feed brauchen nur eine
- * Session, Einreichen zusätzlich `clips.submit`.
+ * Öffentlich (kein Login): leaderboard, browse, search, GET /:id.
+ * Auth-pflichtig: feed/next, mine, einreichen (+`clips.submit`), bewerten,
+ * melden.
  *
- * Reihenfolge beachten: die statischen Pfade `/feed/next` und `/mine`
- * stehen vor `/:id`, sonst fängt der `:id`-Parameter sie ab.
+ * Reihenfolge beachten: die statischen GET-Pfade (`/leaderboard`,
+ * `/browse`, `/search`, `/feed/next`, `/mine`) stehen vor `/:id`, sonst
+ * fängt der `:id`-Parameter sie ab.
  */
 const router = Router();
 
+// ── Öffentlich ──
 router.get('/leaderboard', clipController.leaderboard);
 router.get('/browse', clipController.browse);
 router.get('/search', clipController.search);
 
-router.use(system.authHandler);
+// ── Auth-pflichtig (statische Pfade VOR dem öffentlichen /:id) ──
+router.get('/feed/next', system.authHandler, clipController.feedNext);
+router.get('/mine', system.authHandler, clipController.mine);
+router.post('/', system.authHandler, requirePermission('clips.submit'), clipController.submit);
+router.post('/:id/rating', system.authHandler, clipController.rate);
+router.post('/:id/report', system.authHandler, clipController.report);
 
-router.get('/feed/next', clipController.feedNext);
-router.get('/mine', clipController.mine);
-
-router.post('/', requirePermission('clips.submit'), clipController.submit);
-
-router.get('/:id', clipController.getById);
-router.post('/:id/rating', clipController.rate);
-router.post('/:id/report', clipController.report);
+// Clip-Detail ist öffentlich; der optionale Auth füllt `myRating`, wenn
+// der Aufrufer eingeloggt ist.
+router.get('/:id', system.optionalAuthHandler, clipController.getById);
 
 export default router;
