@@ -36,9 +36,16 @@ function isValidEmail(value: string): boolean {
 
 // ─── Users ──────────────────────────────────────────────────────────────
 
-const listUsers = async (_req: Request, res: Response) => {
-  const users = await userService.getAllUsersWithPermissions();
-  res.status(200).json(users);
+const listUsers = async (req: Request, res: Response) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+  const parsedLimit = Number.parseInt(String(req.query.limit ?? ''), 10);
+  const parsedOffset = Number.parseInt(String(req.query.offset ?? ''), 10);
+  const result = await userService.listUsersWithPermissions({
+    q,
+    limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+    offset: Number.isFinite(parsedOffset) ? parsedOffset : undefined
+  });
+  res.status(200).json(result); // { users, total }
 };
 
 const updateUser = async (req: Request<{ id: string }>, res: Response, next: NextFunction) => {
