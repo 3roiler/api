@@ -220,6 +220,17 @@ export class ClipService {
     return rows[0];
   }
 
+  /** Alle freigegebenen Clips (id + updated_at) für die dynamische Sitemap. */
+  async listApprovedForSitemap(): Promise<{ id: string; updatedAt: Date | null }[]> {
+    const result: QueryResult<{ id: string; updatedAt: Date | null }> =
+      await persistence.database.query(
+        `SELECT id, updated_at AS "updatedAt"
+         FROM public."clip" WHERE status = 'approved'
+         ORDER BY created_at DESC`
+      );
+    return result.rows;
+  }
+
   /**
    * Zufälliger, noch nicht bewerteter, freigegebener Clip — der
    * Kern-Loop. Eigene Clips sind ausgeschlossen (Self-Vote-Sperre).
