@@ -34,6 +34,8 @@ interface OgData {
   url: string;
   image: string;
   type: 'website' | 'article' | 'video.other';
+  /** Optionaler Inline-Player (Discord/X): iframe-Embed-URL + Maße. */
+  video?: { url: string; width: number; height: number };
 }
 
 function renderOg(d: OgData): string {
@@ -58,7 +60,15 @@ function renderOg(d: OgData): string {
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${title}">
 <meta name="twitter:description" content="${desc}">
-<meta name="twitter:image" content="${image}">
+<meta name="twitter:image" content="${image}">${d.video ? `
+<meta property="og:video" content="${esc(d.video.url)}">
+<meta property="og:video:secure_url" content="${esc(d.video.url)}">
+<meta property="og:video:type" content="text/html">
+<meta property="og:video:width" content="${d.video.width}">
+<meta property="og:video:height" content="${d.video.height}">
+<meta name="twitter:player" content="${esc(d.video.url)}">
+<meta name="twitter:player:width" content="${d.video.width}">
+<meta name="twitter:player:height" content="${d.video.height}">` : ''}
 </head>
 <body><p><a href="${url}">${title}</a></p></body>
 </html>`;
@@ -82,12 +92,19 @@ const clip = async (req: Request, res: Response, next: NextFunction) => {
     if (!c || c.status !== 'approved') return next();
     const broadcaster = c.broadcasterName ?? 'Twitch';
     const cat = c.categoryName ? ` · ${c.categoryName}` : '';
+    // Twitch-Clip-Embed mit den Domains, unter denen das Iframe laufen soll
+    // (broiler.dev + Discord-Clients). Discord rendert daraus ggf. einen
+    // Inline-Player; klappt der parent-Check nicht, bleibt die Bild-Vorschau.
+    const embedUrl =
+      `https://clips.twitch.tv/embed?clip=${encodeURIComponent(c.twitchClipId)}` +
+      '&parent=broiler.dev&parent=discord.com&parent=discordapp.com&parent=www.discord.com&autoplay=false';
     return sendOg(res, renderOg({
       title: c.title,
       description: `Clip von ${broadcaster}${cat} — bewertet auf Streamclips Germany.`,
       url: `${SITE}/streamclips/clip/${id}`,
       image: safeImage(c.thumbnailUrl),
-      type: 'video.other'
+      type: 'video.other',
+      video: { url: embedUrl, width: 640, height: 360 }
     }));
   } catch (err) {
     return next(err);
