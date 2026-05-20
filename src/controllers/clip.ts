@@ -123,11 +123,14 @@ const mine = async (req: Request, res: Response, next: NextFunction) => {
 /** GET /api/clips/:id — Detail inkl. eigener Bewertung. */
 const getById = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = requireUser(req);
     const clipId = assertUuid(req.params.id, 'id');
     const clip = await clipService.getById(clipId);
     if (!clip) return next(AppError.notFound('Clip nicht gefunden.', 'CLIP_NOT_FOUND'));
-    const myRating = await clipRatingService.getUserRating(userId, clipId);
+    // Öffentlich: ohne Login kein `myRating`. Bei optionalem Auth ist
+    // `req.userId` gesetzt und wir liefern die eigene Bewertung mit.
+    const myRating = req.userId
+      ? await clipRatingService.getUserRating(req.userId, clipId)
+      : null;
     return res.status(200).json({ ...clip, myRating });
   } catch (err) {
     return next(err);
