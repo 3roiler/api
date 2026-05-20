@@ -7,6 +7,10 @@ const isProduction = (process.env.NODE_ENV || 'development') === 'production';
 const port = Number.parseInt(process.env.PORT || '3000', 10);
 const prefix = process.env.API_PREFIX || '/api';
 const url = process.env.API_URL || `http://localhost:${port}`;
+// Host used as the cookie `Domain` (host-only): `api.broiler.dev` in prod,
+// `localhost` in dev. Mirrors the inline derivation already used for the
+// `access_token` cookie so CSRF/auth cookies share the same scope.
+const cookieDomain = url.replace(/^https?:\/\//, '').split(':')[0];
 const databaseUrl = process.env.DATABASE_URL || '';
 const redisUrl = process.env.REDIS_URL || '';
 const contact = process.env.CONTACT_EMAIL || '';
@@ -74,6 +78,7 @@ export const config = {
   port,
   prefix,
   url,
+  cookieDomain,
   databaseUrl,
   redisUrl,
   contact,
