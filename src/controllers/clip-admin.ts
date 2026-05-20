@@ -2,11 +2,30 @@ import { Request, Response, NextFunction } from 'express';
 import {
   clip as clipService,
   awardCategory as awardCategoryService,
-  twitchCategory as twitchCategoryService
+  twitchCategory as twitchCategoryService,
+  settings as settingsService
 } from '../services/index.js';
 import clipReportService from '../services/clip-report.js';
 import AppError from '../services/error.js';
 import type { ClipStatus, ClipReportStatus, ClipSection } from '../models/index.js';
+
+const SETTING_DAILY_LIMIT = 'clips.auto_approve_daily_limit';
+const SETTING_REQUIRE_ALL = 'clips.require_review_all';
+const SETTING_REVIEW_SECTIONS = 'clips.review_sections';
+
+/** Aktuelle Moderations-Einstellungen mit Defaults (für GET und PUT-Antwort). */
+async function readModerationSettings(): Promise<{
+  autoApproveDailyLimit: number;
+  requireReviewAll: boolean;
+  reviewSections: string[];
+}> {
+  const [autoApproveDailyLimit, requireReviewAll, reviewSections] = await Promise.all([
+    settingsService.getSettingValue<number>(SETTING_DAILY_LIMIT, 5),
+    settingsService.getSettingValue<boolean>(SETTING_REQUIRE_ALL, false),
+    settingsService.getSettingValue<string[]>(SETTING_REVIEW_SECTIONS, [])
+  ]);
+  return { autoApproveDailyLimit, requireReviewAll, reviewSections };
+}
 
 const VALID_SECTIONS: ClipSection[] = [
   'gaming', 'just_chatting', 'irl', 'music', 'esports', 'creative', 'other'
@@ -204,6 +223,59 @@ const setCategorySection = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ─── Moderations-Einstellungen ────────────────────────────────────────────────
+
+/** GET /moderation-settings */
+const getModerationSettings = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.status(200).json(await readModerationSettings());
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * PUT /moderation-settings — Body (alle optional):
+ * { autoApproveDailyLimit, requireReviewAll, reviewSections }
+ */
+const updateModerationSettings = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = requireUser(req);
+    const body = (req.body ?? {}) as {
+      autoApproveDailyLimit?: unknown;
+      requireReviewAll?: unknown;
+      reviewSections?: unknown;
+    };
+
+    if (body.autoApproveDailyLimit !== undefined) {
+      const n = body.autoApproveDailyLimit;
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 1000) {
+        return next(AppError.badRequest('autoApproveDailyLimit muss eine ganze Zahl 0–1000 sein.', 'BAD_LIMIT'));
+      }
+      await settingsService.upsertSetting(SETTING_DAILY_LIMIT, { value: n, updatedBy: userId });
+    }
+
+    if (body.requireReviewAll !== undefined) {
+      if (typeof body.requireReviewAll !== 'boolean') {
+        return next(AppError.badRequest('requireReviewAll muss boolean sein.', 'BAD_TOGGLE'));
+      }
+      await settingsService.upsertSetting(SETTING_REQUIRE_ALL, { value: body.requireReviewAll, updatedBy: userId });
+    }
+
+    if (body.reviewSections !== undefined) {
+      const list = body.reviewSections;
+      if (!Array.isArray(list) || list.some((s) => !VALID_SECTIONS.includes(s as ClipSection))) {
+        return next(AppError.badRequest(`reviewSections muss ein Array gültiger Sektionen sein: ${VALID_SECTIONS.join(', ')}.`, 'BAD_SECTIONS'));
+      }
+      await settingsService.upsertSetting(SETTING_REVIEW_SECTIONS, { value: [...new Set(list)], updatedBy: userId });
+    }
+
+    return res.status(200).json(await readModerationSettings());
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export default {
   moderationQueue,
   setStatus,
@@ -214,5 +286,7 @@ export default {
   listReports,
   resolveReport,
   listCategories,
-  setCategorySection
+  setCategorySection,
+  getModerationSettings,
+  updateModerationSettings
 };
