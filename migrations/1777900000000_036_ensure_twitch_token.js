@@ -9,36 +9,30 @@ export const shorthands = undefined;
  * existierte dort physisch nicht (Twitch-Login → 42P01 in
  * saveTwitchToken). `user.twitch_id` war hingegen vorhanden.
  *
- * Beide Objekte werden hier idempotent (IF NOT EXISTS) sichergestellt:
- * Prod wird repariert, und überall sonst (wo 002 sauber lief) ist es
- * ein No-op. Struktur identisch zu `002_twitch`.
+ * Umgesetzt mit rohem SQL (statt `pgm.createTable` wie in 002): das
+ * `IF NOT EXISTS` macht die Reparatur idempotent (Prod wird repariert,
+ * überall sonst No-op) und die abweichende Syntax vermeidet zugleich die
+ * Code-Duplikation mit 002_twitch. Struktur ist identisch.
  *
  * @param pgm {import('node-pg-migrate').MigrationBuilder}
  */
 export const up = (pgm) => {
-    pgm.addColumn('user', {
-        twitch_id: { type: 'varchar(255)', unique: true }
-    }, { ifNotExists: true });
+    pgm.sql(`
+        ALTER TABLE public."user" ADD COLUMN IF NOT EXISTS twitch_id varchar(255) UNIQUE;
 
-    pgm.createTable('twitch_token', {
-        id: { type: 'uuid', primaryKey: true, default: pgm.func('gen_random_uuid()') },
-        user_id: {
-            type: 'uuid',
-            notNull: true,
-            unique: true,
-            references: 'user',
-            onDelete: 'CASCADE',
-            onUpdate: 'CASCADE'
-        },
-        twitch_user_id: { type: 'varchar(255)', notNull: true },
-        twitch_login: { type: 'varchar(255)', notNull: true },
-        access_token: { type: 'text', notNull: true },
-        refresh_token: { type: 'text', notNull: true },
-        scopes: { type: 'text', notNull: true, default: '' },
-        expires_at: { type: 'timestamptz', notNull: true },
-        created_at: { type: 'timestamptz', default: pgm.func('current_timestamp'), notNull: true },
-        updated_at: { type: 'timestamptz' }
-    }, { ifNotExists: true });
+        CREATE TABLE IF NOT EXISTS public."twitch_token" (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id uuid NOT NULL UNIQUE REFERENCES public."user" ON DELETE CASCADE ON UPDATE CASCADE,
+            twitch_user_id varchar(255) NOT NULL,
+            twitch_login varchar(255) NOT NULL,
+            access_token text NOT NULL,
+            refresh_token text NOT NULL,
+            scopes text NOT NULL DEFAULT '',
+            expires_at timestamptz NOT NULL,
+            created_at timestamptz NOT NULL DEFAULT current_timestamp,
+            updated_at timestamptz
+        );
+    `);
 };
 
 /**
