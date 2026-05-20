@@ -163,7 +163,38 @@ export class UserService {
    * Lists every user with their direct and group-inherited permissions
    * aggregated into a single sorted array per user. Used by the admin UI.
    */
-  async getAllUsersWithPermissions(): Promise<Array<User & { permissions: string[]; directPermissions: string[] }>> {
+  /**
+   * Paginierte Nutzerliste mit Berechtigungen fürs Dashboard. `q` filtert
+   * optional auf name/display_name/email (ILIKE). `total` ist die volle
+   * Treffermenge (für die Pagination-UI), unabhängig von limit/offset.
+   */
+  async listUsersWithPermissions(
+    opts: { q?: string; limit?: number; offset?: number } = {}
+  ): Promise<{ users: Array<User & { permissions: string[]; directPermissions: string[] }>; total: number }> {
+    const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const q = (opts.q ?? '').trim();
+
+    const filterParams: unknown[] = [];
+    let where = '';
+    if (q.length >= 1) {
+      const pattern = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+      filterParams.push(pattern);
+      where = `WHERE (u.name ILIKE $1 ESCAPE '\\'
+                  OR u.display_name ILIKE $1 ESCAPE '\\'
+                  OR u.email ILIKE $1 ESCAPE '\\')`;
+    }
+
+    const countResult: QueryResult<{ total: number }> = await persistence.database.query(
+      `SELECT COUNT(*)::int AS total FROM public."user" u ${where}`,
+      filterParams
+    );
+    const total = countResult.rows[0]?.total ?? 0;
+
+    const listParams = [...filterParams, limit, offset];
+    const limitParam = `$${listParams.length - 1}`;
+    const offsetParam = `$${listParams.length}`;
+
     const result: QueryResult<User & { permissions: string[] | null; directPermissions: string[] | null }> =
       await persistence.database.query(
         `SELECT ${USER_COLUMNS},
@@ -190,14 +221,18 @@ export class UserService {
             ARRAY[]::text[]
           ) AS "directPermissions"
          FROM public."user" u
-         ORDER BY created_at DESC`
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT ${limitParam} OFFSET ${offsetParam}`,
+        listParams
       );
 
-    return result.rows.map(row => ({
+    const users = result.rows.map(row => ({
       ...row,
       permissions: row.permissions ?? [],
       directPermissions: row.directPermissions ?? []
     }));
+    return { users, total };
   }
 
   async authenticate(username: string, password: string): Promise<User | null> {
