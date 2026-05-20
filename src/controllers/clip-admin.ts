@@ -65,7 +65,9 @@ const moderationQueue = async (req: Request, res: Response, next: NextFunction) 
       }
       statuses = tokens as ClipStatus[];
     }
-    const rows = await clipService.listForModeration(statuses);
+    const limit = Math.min(Number.parseInt(String(req.query.limit ?? '50'), 10) || 50, 100);
+    const offset = Math.max(Number.parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+    const rows = await clipService.listForModeration(statuses, limit, offset);
     return res.status(200).json(rows);
   } catch (err) {
     return next(err);
@@ -172,7 +174,9 @@ const listReports = async (req: Request, res: Response, next: NextFunction) => {
       }
       status = req.query.status as ClipReportStatus;
     }
-    return res.status(200).json(await clipReportService.list(status));
+    const limit = Math.min(Number.parseInt(String(req.query.limit ?? '50'), 10) || 50, 100);
+    const offset = Math.max(Number.parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
+    return res.status(200).json(await clipReportService.list(status, limit, offset));
   } catch (err) {
     return next(err);
   }
