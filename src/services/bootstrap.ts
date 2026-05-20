@@ -34,7 +34,12 @@ const ADMIN_PERMISSIONS = [
   // who should only submit get `print.request` granted manually via
   // the admin UI.
   'print.request',
-  'print.moderate'
+  'print.moderate',
+  // Streamclips Germany: admins can submit and moderate; the dashboard
+  // section gate comes along too.
+  'dashboard.clips',
+  'clips.submit',
+  'clips.moderate'
 ] as const;
 
 /**

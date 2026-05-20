@@ -31,7 +31,15 @@ export const PERMISSIONS: readonly PermissionDefinition[] = [
   // ticket from the public-side header link, `print.moderate` lets
   // the owner manage the queue, change status, assign a printer.
   { key: 'print.request', description: 'Druckanfragen stellen und eigene verfolgen.' },
-  { key: 'print.moderate', description: 'Alle Druckanfragen verwalten, Status setzen, Drucker zuweisen.' }
+  { key: 'print.moderate', description: 'Alle Druckanfragen verwalten, Status setzen, Drucker zuweisen.' },
+  // Streamclips Germany — `clips.submit` zum Einreichen (für jeden
+  // eingeloggten Nutzer beim Bootstrap nicht nötig: Bewerten braucht nur
+  // Login, Einreichen dieses Recht). `clips.moderate` für Freigabe,
+  // Award-/Sektions-Pflege und Meldungen; `dashboard.clips` schaltet die
+  // Dashboard-Sektion frei.
+  { key: 'dashboard.clips', description: 'Streamclips-Bereich im Dashboard (Moderation, Awards, Sektionen, Meldungen).' },
+  { key: 'clips.submit', description: 'Twitch-Clips bei Streamclips einreichen.' },
+  { key: 'clips.moderate', description: 'Clips freigeben/ablehnen, Award-Kategorien und Sektionen verwalten, Meldungen bearbeiten.' }
 ] as const;
 
 const PERMISSION_KEYS = new Set(PERMISSIONS.map(p => p.key));

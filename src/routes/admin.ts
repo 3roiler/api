@@ -4,6 +4,7 @@ import adminController from '../controllers/admin.js';
 import requirePermission from '../middleware/requirePermission.js';
 import settingsRouter from './settings.js';
 import metricsRouter from './metrics.js';
+import clipsAdminRouter from './clips-admin.js';
 
 const router = Router();
 
@@ -23,6 +24,11 @@ router.use('/settings', settingsRouter);
 // future "metrics viewer" role could see utilisation without also getting
 // admin capabilities. Reads token + resource IDs from the settings store.
 router.use('/metrics', metricsRouter);
+
+// Streamclips-Moderation. Eigenes `clips.moderate`-Gate im Sub-Router,
+// daher NICHT über den umbrella `adminGate` — so kann ein reiner
+// Clip-Moderator ohne User-CRUD-Rechte existieren.
+router.use('/streamclips', clipsAdminRouter);
 
 // ─── Permissions catalog ────────────────────────────────────────────────
 router.get('/permissions', ...adminGate, adminController.listPermissions);

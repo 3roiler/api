@@ -53,6 +53,14 @@ services:
       dockerfile: Dockerfile
     container_name: api-server
     restart: unless-stopped
+    # App-Konfiguration (TWITCH_*, JWT_SECRET, ADMIN_EMAILS, SECRETS_KEY …)
+    # kommt aus der .env — sie liegt in .dockerignore, landet also nicht im
+    # Image und muss zur Laufzeit injiziert werden. Die expliziten
+    # `environment:`-Werte unten haben Vorrang vor env_file, daher zeigt
+    # DATABASE_URL/REDIS_URL korrekt auf die Container-Hostnamen statt auf
+    # das localhost aus der .env.
+    env_file:
+      - .env
     environment:
       PORT: ${API_PORT:-3000}
       DATABASE_URL: postgresql://${PG_USER:-postgres}:${PG_PASSWORD:-postgres}@postgres:${PG_PORT:-5432}/${PG_DB:-api_db}
