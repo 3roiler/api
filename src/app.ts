@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import { config, logger, system, error, bootstrap } from './services';
 import routes from './routes';
 import cors from 'cors';
+import csrfGuard from './middleware/csrf.js';
 
 const app: Application = express();
 
@@ -26,6 +27,11 @@ app.use(cors({
   origin: corsOrigin,
   credentials: true
 }));
+
+// CSRF: Origin-Validierung für mutierende, Cookie-authentifizierte Requests
+// (zweite Schicht neben dem SameSite-Cookie). Muss nach cookieParser/CORS
+// laufen, da es req.cookies und den Origin-Header auswertet.
+app.use(csrfGuard);
 
 /**
  * Global 100 req / 10 min per-IP limit. The metrics router owns its own,
