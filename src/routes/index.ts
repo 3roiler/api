@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { system } from '../services';
 import { csrfTokenHandler } from '../middleware/csrf.js';
+import ogController from '../controllers/og.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -35,6 +36,11 @@ router.get(
 // CSRF: das SPA holt hier sein Token (Body) und echo't es per X-CSRF-Token.
 // Öffentlich + ohne Seiteneffekt; das Token-Cookie setzt der globale Guard.
 router.get('/csrf', csrfTokenHandler);
+
+// Open-Graph für Social-Crawler (Caddy leitet nur Crawler-UAs hierher um).
+// Öffentlich + nur lesend; rendert serverseitig Meta-Tags für teilbare Seiten.
+router.get('/og/streamclips/clip/:id', ogController.clip);
+router.get('/og/blog/:slug', ogController.post);
 
 router.post('/login', system.loginHandler);
 router.post('/register', system.registerHandler);
