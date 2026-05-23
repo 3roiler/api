@@ -206,4 +206,46 @@ const search = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
-export default { submit, feedNext, rate, mine, getById, report, leaderboard, browse, search };
+/**
+ * GET /api/clips/by-broadcaster/:broadcasterId?excludeId=&limit= — PUBLIC.
+ * Weitere freigegebene Clips desselben Twitch-Broadcasters. Genutzt für
+ * das „Mehr von diesem Streamer"-Karussell auf der Clip-Detailseite.
+ */
+const byBroadcaster = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const broadcasterId =
+      typeof req.params.broadcasterId === 'string' ? req.params.broadcasterId.trim() : '';
+    if (!broadcasterId) {
+      return next(AppError.badRequest('broadcasterId fehlt.', 'BAD_BROADCASTER'));
+    }
+    const excludeId =
+      typeof req.query.excludeId === 'string' ? req.query.excludeId : undefined;
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : undefined;
+    const rows = await clipService.listByBroadcaster(broadcasterId, { excludeId, limit });
+    return res.status(200).json(rows);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * GET /api/clips/feed/foryou?limit= — AUTH. Personalisierter „Für dich"-
+ * Feed. Algorithmus in `clipService.listPersonalFeed` dokumentiert.
+ */
+const feedForYou = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = requireUser(req);
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 12;
+    const rows = await clipService.listPersonalFeed(userId, limit);
+    return res.status(200).json(rows);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export default {
+  submit, feedNext, feedForYou, rate, mine, getById,
+  report, leaderboard, browse, search, byBroadcaster
+};

@@ -22,9 +22,13 @@ const router = Router();
 router.get('/leaderboard', clipController.leaderboard);
 router.get('/browse', clipController.browse);
 router.get('/search', clipController.search);
+// „Mehr von diesem Streamer"-Karussell auf der Clip-Detailseite. Pfad-Param
+// `broadcasterId` ist eine numerische Twitch-User-ID, kein UUID.
+router.get('/by-broadcaster/:broadcasterId', clipController.byBroadcaster);
 
 // ── Auth-pflichtig (statische Pfade VOR dem öffentlichen /:id) ──
 router.get('/feed/next', system.authHandler, clipController.feedNext);
+router.get('/feed/foryou', system.authHandler, clipController.feedForYou);
 router.get('/mine', system.authHandler, clipController.mine);
 router.post('/', system.authHandler, requirePermission('clips.submit'), clipController.submit);
 router.post('/:id/rating', system.authHandler, clipController.rate);

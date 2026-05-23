@@ -74,22 +74,87 @@ const moderationQueue = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+/**
+ * Validiert die `status` + `rejectionReason`-Felder, die sowohl
+ * `setStatus` (Einzel-Update) als auch `bulkModerate` (Bulk-Update) aus
+ * dem Body lesen. Liefert das Tupel zurück oder gibt einen Validierungs-
+ * Fehler über `next` ab und returnt `null`.
+ */
+function parseStatusUpdate(
+  body: Record<string, unknown>,
+  next: NextFunction
+): { status: ClipStatus; rejectionReason: string | null } | null {
+  if (typeof body.status !== 'string' || !VALID_CLIP_STATUSES.includes(body.status as ClipStatus)) {
+    next(AppError.badRequest(`status muss einer von: ${VALID_CLIP_STATUSES.join(', ')} sein.`, 'BAD_STATUS'));
+    return null;
+  }
+  let rejectionReason: string | null = null;
+  const reasonRaw = body.rejectionReason;
+  if (reasonRaw !== undefined && reasonRaw !== null && reasonRaw !== '') {
+    if (typeof reasonRaw !== 'string' || reasonRaw.length > 500) {
+      next(AppError.badRequest('rejectionReason muss String ≤ 500 Zeichen sein.', 'BAD_REASON'));
+      return null;
+    }
+    rejectionReason = reasonRaw.trim();
+  }
+  return { status: body.status as ClipStatus, rejectionReason };
+}
+
+/**
+ * POST /clips/bulk-moderate — Body: { ids: string[], status, rejectionReason? }
+ * Setzt mehrere Clips in einem Rutsch auf denselben Status. UI-Komfort
+ * für lange Queues; Limit ist 100 pro Request, damit ein Tippfehler die
+ * DB nicht in einen Stoßstand schickt.
+ *
+ * Wir loopen bewusst über `clipService.setStatus` statt eine
+ * `UPDATE … WHERE id = ANY` zu fahren — der Service-Pfad bleibt damit
+ * die single source of truth (Validierung, Audit, etc.). Bei N ≤ 100
+ * ist der Mehraufwand vernachlässigbar.
+ */
+const bulkModerate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!Array.isArray(body.ids) || body.ids.length === 0) {
+      return next(AppError.badRequest('ids muss ein nicht-leeres Array sein.', 'BAD_IDS'));
+    }
+    if (body.ids.length > 100) {
+      return next(AppError.badRequest('Maximal 100 Clips pro Bulk-Aktion.', 'TOO_MANY_IDS'));
+    }
+    if (body.ids.some((id) => typeof id !== 'string' || !UUID_RE.test(id))) {
+      return next(AppError.badRequest('Alle ids müssen UUIDs sein.', 'BAD_UUID'));
+    }
+    const parsed = parseStatusUpdate(body, next);
+    if (!parsed) return;
+
+    const ids = [...new Set(body.ids as string[])];
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const id of ids) {
+      try {
+        await clipService.setStatus(id, parsed.status, parsed.rejectionReason);
+        results.push({ id, ok: true });
+      } catch (err) {
+        results.push({
+          id,
+          ok: false,
+          error: err instanceof Error ? err.message : 'unknown'
+        });
+      }
+    }
+    const okCount = results.filter((r) => r.ok).length;
+    return res.status(200).json({ total: results.length, ok: okCount, results });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 /** PATCH /clips/:id — Body: { status, rejectionReason? } */
 const setStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = assertUuid(req.params.id, 'id');
-    const body = (req.body ?? {}) as { status?: unknown; rejectionReason?: unknown };
-    if (typeof body.status !== 'string' || !VALID_CLIP_STATUSES.includes(body.status as ClipStatus)) {
-      return next(AppError.badRequest(`status muss einer von: ${VALID_CLIP_STATUSES.join(', ')} sein.`, 'BAD_STATUS'));
-    }
-    let rejectionReason: string | null = null;
-    if (body.rejectionReason !== undefined && body.rejectionReason !== null && body.rejectionReason !== '') {
-      if (typeof body.rejectionReason !== 'string' || body.rejectionReason.length > 500) {
-        return next(AppError.badRequest('rejectionReason muss String ≤ 500 Zeichen sein.', 'BAD_REASON'));
-      }
-      rejectionReason = body.rejectionReason.trim();
-    }
-    const updated = await clipService.setStatus(id, body.status as ClipStatus, rejectionReason);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const parsed = parseStatusUpdate(body, next);
+    if (!parsed) return;
+    const updated = await clipService.setStatus(id, parsed.status, parsed.rejectionReason);
     return res.status(200).json(updated);
   } catch (err) {
     return next(err);
@@ -283,6 +348,7 @@ const updateModerationSettings = async (req: Request, res: Response, next: NextF
 export default {
   moderationQueue,
   setStatus,
+  bulkModerate,
   listAwards,
   createAward,
   updateAward,

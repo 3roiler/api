@@ -2,3 +2,11 @@ node_modules/
 dist/
 .certs/
 .env
+
+# Lokale Backups vor riskanten Operationen (Pull, Rebase, etc.).
+# Werden vom Tooling angelegt, gehören nie ins Repo.
+.local-backup/
+
+# Lokale Claude-Instruktionen — projektspezifischer Coaching-Text.
+# Wird vom Maintainer manuell gepflegt, ist kein Repo-Artefakt.
+CLAUDE.md
