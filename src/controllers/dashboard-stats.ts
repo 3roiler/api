@@ -11,54 +11,19 @@ import persistence from '../services/persistence.js';
  *
  * Permissions werden vom Mount-Pfad im Router (`adminGate`) geprüft.
  */
+
+/** Helper: `COUNT(*) ... WHERE <predicate>` parallel ausführbar. Gibt
+ *  den Zahlwert zurück (kein Cast in jeder Callsite). */
+function countWhere(table: string, predicate: string): Promise<number> {
+  return persistence.database
+    .query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM public."${table}" ${predicate}`
+    )
+    .then((q) => Number(q.rows[0]?.count ?? 0));
+}
+
 const stats = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const queries = await Promise.all([
-      // Clips in Moderation
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."clip" WHERE status = 'pending'`
-      ),
-      // Clips als gemeldet markiert
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."clip" WHERE status = 'flagged'`
-      ),
-      // Offene Clip-Reports
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."clip_report" WHERE status = 'open'`
-      ),
-      // Veröffentlichte Blog-Posts
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."blog_post" WHERE published_at IS NOT NULL`
-      ),
-      // Blog-Drafts
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."blog_post" WHERE published_at IS NULL`
-      ),
-      // Druckanfragen (offen — Status `requested`/`approved`/`printing`)
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."print_request"
-         WHERE status IN ('requested', 'approved', 'printing')`
-      ),
-      // User-Total
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."user"`
-      ),
-      // Neue User in den letzten 30 Tagen
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."user"
-         WHERE created_at >= NOW() - INTERVAL '30 days'`
-      ),
-      // Neue Bewertungen in den letzten 7 Tagen
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."clip_rating"
-         WHERE created_at >= NOW() - INTERVAL '7 days' AND score IS NOT NULL`
-      ),
-      // Freigegebene Clips (für Ratio-Anzeige)
-      persistence.database.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM public."clip" WHERE status = 'approved'`
-      )
-    ]);
-
     const [
       clipsPending,
       clipsFlagged,
@@ -70,7 +35,18 @@ const stats = async (_req: Request, res: Response, next: NextFunction) => {
       usersNew30d,
       ratings7d,
       clipsApproved
-    ] = queries.map((q) => Number(q.rows[0]?.count ?? 0));
+    ] = await Promise.all([
+      countWhere('clip', `WHERE status = 'pending'`),
+      countWhere('clip', `WHERE status = 'flagged'`),
+      countWhere('clip_report', `WHERE status = 'open'`),
+      countWhere('blog_post', `WHERE published_at IS NOT NULL`),
+      countWhere('blog_post', `WHERE published_at IS NULL`),
+      countWhere('print_request', `WHERE status IN ('requested', 'approved', 'printing')`),
+      countWhere('user', ''),
+      countWhere('user', `WHERE created_at >= NOW() - INTERVAL '30 days'`),
+      countWhere('clip_rating', `WHERE created_at >= NOW() - INTERVAL '7 days' AND score IS NOT NULL`),
+      countWhere('clip', `WHERE status = 'approved'`)
+    ]);
 
     return res.status(200).json({
       clips: {
