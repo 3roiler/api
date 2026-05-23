@@ -160,18 +160,24 @@ export class CommentService {
       }
     }
 
-    // 30 s Cooldown — gleicher User auf gleichen Parent/Target.
+    // 30 s Cooldown — gleicher User auf gleichen Parent/Target. Wir
+    // bauen die Param-Liste passend zum SQL: 3 Werte bei Top-Level
+    // Posts, 4 Werte bei Replies (zusätzlicher parent_comment_id).
+    const cooldownParams: unknown[] = [input.targetType, input.targetId, input.userId];
+    let cooldownParentClause = 'parent_comment_id IS NULL';
+    if (input.parentCommentId !== null) {
+      cooldownParams.push(input.parentCommentId);
+      cooldownParentClause = `parent_comment_id = $${cooldownParams.length}::uuid`;
+    }
     const recentRes: QueryResult<{ count: string }> = await persistence.database.query(
       `SELECT COUNT(*)::text AS count FROM public."comment"
        WHERE target_type = $1
          AND target_id = $2::uuid
          AND user_id = $3::uuid
-         AND ${input.parentCommentId === null ? 'parent_comment_id IS NULL' : 'parent_comment_id = $5::uuid'}
+         AND ${cooldownParentClause}
          AND created_at >= NOW() - INTERVAL '30 seconds'
          AND deleted_at IS NULL`,
-      input.parentCommentId === null
-        ? [input.targetType, input.targetId, input.userId]
-        : [input.targetType, input.targetId, input.userId, input.parentCommentId, input.parentCommentId]
+      cooldownParams
     );
     if (Number(recentRes.rows[0]?.count ?? 0) > 0) {
       throw AppError.tooManyRequests(
