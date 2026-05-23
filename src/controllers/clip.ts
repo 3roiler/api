@@ -245,7 +245,22 @@ const feedForYou = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+/**
+ * GET /api/clips/contributors?limit= — PUBLIC. Top-Einreicher.
+ * Liefert pro User: clipCount, avgScore, topClipId, topClipTitle.
+ */
+const contributors = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 25;
+    const rows = await clipService.listTopContributors(limit);
+    return res.status(200).json(rows);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export default {
   submit, feedNext, feedForYou, rate, mine, getById,
-  report, leaderboard, browse, search, byBroadcaster
+  report, leaderboard, browse, search, byBroadcaster, contributors
 };

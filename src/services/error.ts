@@ -39,6 +39,10 @@ function forbidden(message: string, identifier: string = 'FORBIDDEN') {
   return new AppError(403, identifier, message);
 }
 
+function tooManyRequests(message: string, identifier: string = 'TOO_MANY_REQUESTS') {
+  return new AppError(429, identifier, message);
+}
+
 export default {
   AppError,
   badRequest,
@@ -47,5 +51,6 @@ export default {
   internal,
   serviceUnavailable,
   unauthorized,
-  forbidden
+  forbidden,
+  tooManyRequests
 };

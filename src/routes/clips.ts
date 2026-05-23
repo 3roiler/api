@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { system } from '../services/index.js';
 import requirePermission from '../middleware/requirePermission.js';
 import clipController from '../controllers/clip.js';
+import clipCommentController from '../controllers/clip-comment.js';
 
 /**
  * `/api/clips` — Streamclips-Kernrouten. Auth ist hier pro Route gesetzt
@@ -22,6 +23,7 @@ const router = Router();
 router.get('/leaderboard', clipController.leaderboard);
 router.get('/browse', clipController.browse);
 router.get('/search', clipController.search);
+router.get('/contributors', clipController.contributors);
 // „Mehr von diesem Streamer"-Karussell auf der Clip-Detailseite. Pfad-Param
 // `broadcasterId` ist eine numerische Twitch-User-ID, kein UUID.
 router.get('/by-broadcaster/:broadcasterId', clipController.byBroadcaster);
@@ -33,6 +35,11 @@ router.get('/mine', system.authHandler, clipController.mine);
 router.post('/', system.authHandler, requirePermission('clips.submit'), clipController.submit);
 router.post('/:id/rating', system.authHandler, clipController.rate);
 router.post('/:id/report', system.authHandler, clipController.report);
+
+// Kommentare — list ist public, post braucht Login. Delete liegt unter
+// `/comments/:id` (ohne Clip-Präfix) im root router.
+router.get('/:id/comments', clipCommentController.list);
+router.post('/:id/comments', system.authHandler, clipCommentController.create);
 
 // Clip-Detail ist öffentlich; der optionale Auth füllt `myRating`, wenn
 // der Aufrufer eingeloggt ist.

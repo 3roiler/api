@@ -253,23 +253,45 @@ export class ClipService {
   }
 
   /**
-   * Personalisierter „Für dich"-Feed. Algorithmus:
-   *   1. Top-Kategorien aus den positiv (≥ 3 Sterne) bewerteten Clips
-   *      des Users — die räumen für sich allein schon den Beigeschmack
-   *      „der mag das"-Signal ein.
-   *   2. Top-Clips aus diesen Kategorien, die der User noch nicht
-   *      bewertet hat und die er nicht selbst eingereicht hat.
-   *   3. Fallback wenn (1) leer ist: Top-Clips der letzten 30 Tage
-   *      (Bayesian Leaderboard).
+   * Personalisierter „Für dich"-Feed (v2).
    *
-   * Bewusst keine Vector-Embeddings, keine Collab-Filter, kein
-   * Trending-Score — das wäre erst sinnvoll, wenn wir 100× mehr
-   * Clips/Ratings haben. Diese Variante kommt mit zwei DB-Queries
-   * aus und liefert Empfehlungen, die der User nachvollziehen kann.
+   * Im Kern ein simples scoring-Modell mit drei Signalen, mehr braucht's
+   * für den aktuellen Datenbestand nicht. Pro Clip wird ein Score
+   * berechnet:
+   *
+   *     score = matching_signal * 0.55      // mag der User die Kategorie?
+   *           + bayesian_quality * 0.30     // wie gut ist der Clip global?
+   *           + recency_boost * 0.15        // wie frisch ist der Clip?
+   *
+   * - `matching_signal`: 1.0 wenn der Clip in einer der drei meistbewer-
+   *   teten Kategorien des Users liegt, 0.5 in einer weiteren Top-6,
+   *   0.0 sonst.
+   * - `bayesian_quality`: avg_score, Bayesian gegen die globale Median-
+   *   Bewertung gedämpft (gleiche Formel wie der Leaderboard).
+   * - `recency_boost`: 1.0 für < 3 Tage, linear runter auf 0.0 bei
+   *   30 Tagen — neue Clips bekommen also einen kleinen Push, damit sie
+   *   nicht in einem von alten Top-Clips zugemüllten Feed verschwinden.
+   *
+   * Wir exkludieren weiterhin Clips, die der User selbst eingereicht
+   * oder bereits bewertet hat. Cold-Start (keine Ratings vom User):
+   * fällt auf das 30-Tage-Leaderboard zurück — mit demselben Recency-
+   * Boost, damit auch dort frische Einreichungen sichtbar bleiben.
+   *
+   * Bewusst keine Vector-Embeddings, keine Collab-Filter — die liefern
+   * unter ~10k Ratings nur Rauschen. Diese Variante ist eine Query und
+   * der User kann nachvollziehen, warum ein Clip im Feed steht.
    */
   async listPersonalFeed(userId: string, limit = 12): Promise<ClipWithContext[]> {
     const safeLimit = Math.min(Math.max(limit, 1), 36);
+    const M = 5; // Mindeststimmen-Gewicht für die Bayesian-Dämpfung
 
+    // Globaler Score-Durchschnitt — nur einmal pro Aufruf.
+    const avgRes: QueryResult<{ avg: number | null }> = await persistence.database.query(
+      `SELECT AVG(score)::float8 AS avg FROM public."clip_rating" WHERE score IS NOT NULL`
+    );
+    const globalAvg = avgRes.rows[0]?.avg ?? 0;
+
+    // User-Kategorie-Präferenzen — Top 6, ordered nach (count, avg).
     const catRes: QueryResult<{ gameId: string }> = await persistence.database.query(
       `SELECT c.game_id AS "gameId"
        FROM public."clip_rating" r
@@ -284,35 +306,162 @@ export class ClipService {
       [userId]
     );
     const gameIds = catRes.rows.map((row) => row.gameId).filter(Boolean);
+    const primaryIds = gameIds.slice(0, 3);
+    const secondaryIds = gameIds.slice(3);
 
+    // Cold-Start: User hat keine ≥-3-Bewertungen. Top-Clips der letzten
+    // 30 Tage mit Recency-Boost, sonst sähe die Empfehlung wie ein
+    // jahrealtes „best of"-Album aus.
     if (gameIds.length === 0) {
-      return this.leaderboard({ limit: safeLimit, periodDays: 30 });
+      const result: QueryResult<ClipCtxRow> = await persistence.database.query(
+        `${CLIP_CTX_SELECT}
+         WHERE c.status = 'approved'
+           AND c.created_at >= NOW() - INTERVAL '30 days'
+           AND c.submitted_by_user_id <> $1::uuid
+         ORDER BY (
+             COALESCE(agg.rating_count, 0)::float8
+               / (COALESCE(agg.rating_count, 0) + $2)
+           ) * COALESCE(agg.avg_score, 0)
+           + ($2::float8 / (COALESCE(agg.rating_count, 0) + $2)) * $3
+           + GREATEST(
+               0,
+               1.0 - EXTRACT(EPOCH FROM (NOW() - c.created_at)) / (30 * 86400)
+             ) * 1.5
+           DESC
+         LIMIT $4::int`,
+        [userId, M, globalAvg, safeLimit]
+      );
+      const rows = this.withAwardsStub(result.rows);
+      if (rows.length > 0) {
+        await this.attachAwards(rows);
+        return rows;
+      }
+      // Wirklich nichts in den letzten 30 Tagen — Allzeit-Leaderboard
+      // ist der allerletzte Fallback.
+      return this.leaderboard({ limit: safeLimit });
     }
 
+    // Personalisiertes Scoring. matching_signal kommt aus zwei
+    // konditionalen Tests gegen die User-Kategorien.
     const result: QueryResult<ClipCtxRow> = await persistence.database.query(
       `${CLIP_CTX_SELECT}
        WHERE c.status = 'approved'
-         AND c.game_id = ANY($1::text[])
-         AND c.submitted_by_user_id <> $2::uuid
+         AND c.submitted_by_user_id <> $1::uuid
          AND NOT EXISTS (
            SELECT 1 FROM public."clip_rating" r
-           WHERE r.clip_id = c.id AND r.user_id = $2::uuid
+           WHERE r.clip_id = c.id AND r.user_id = $1::uuid
          )
-       ORDER BY COALESCE(agg.avg_score, 0) DESC NULLS LAST,
-                agg.rating_count DESC,
-                c.created_at DESC
-       LIMIT $3::int`,
-      [gameIds, userId, safeLimit]
+         AND (
+           c.game_id = ANY($2::text[])
+           OR c.game_id = ANY($3::text[])
+           -- Letztes Sprungbrett: ohne Kategorie-Match landen nur Clips
+           -- der letzten 14 Tage in der Ergebnismenge — der Pool bleibt
+           -- klein genug, dass Personalisierung nicht zerschossen wird,
+           -- aber frische Einreichungen bekommen eine echte Chance.
+           OR c.created_at >= NOW() - INTERVAL '14 days'
+         )
+       ORDER BY (
+           CASE
+             WHEN c.game_id = ANY($2::text[]) THEN 1.0
+             WHEN c.game_id = ANY($3::text[]) THEN 0.5
+             ELSE 0.0
+           END
+         ) * 0.55
+         + (
+             (COALESCE(agg.rating_count, 0)::float8
+               / (COALESCE(agg.rating_count, 0) + $4))
+             * COALESCE(agg.avg_score, 0)
+             + ($4::float8 / (COALESCE(agg.rating_count, 0) + $4)) * $5
+           ) / 5.0 * 0.30
+         + GREATEST(
+             0,
+             1.0 - EXTRACT(EPOCH FROM (NOW() - c.created_at)) / (30 * 86400)
+           ) * 0.15
+         DESC,
+         agg.rating_count DESC NULLS LAST
+       LIMIT $6::int`,
+      [userId, primaryIds, secondaryIds, M, globalAvg, safeLimit]
     );
     const rows = this.withAwardsStub(result.rows);
     if (rows.length === 0) {
-      // Top-Kategorien hatten keine neuen Clips → wir geben dem User
-      // wenigstens den allgemeinen Top-30-Tage-Schnitt zurück, damit der
-      // Feed nicht ganz leer ist.
       return this.leaderboard({ limit: safeLimit, periodDays: 30 });
     }
     await this.attachAwards(rows);
     return rows;
+  }
+
+  /**
+   * Top-Einreicher („Hall of Fame"). Liefert User mit aggregierten
+   * Metriken über ihre approved Clips: Anzahl, durchschnittlicher
+   * Score, beliebtester Clip-Titel. Sortiert nach einem zusammen-
+   * gesetzten Score (avg_score × log(count)).
+   *
+   * Bewusst nur approved Clips — Submissions in der Pipeline würden
+   * sonst die Tabelle volatilen Kennzahlen aussetzen, je nachdem
+   * ob ein Mod gerade durchwirkt.
+   */
+  async listTopContributors(
+    limit = 25
+  ): Promise<{
+    userId: string;
+    name: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    clipCount: number;
+    avgScore: number | null;
+    topClipId: string | null;
+    topClipTitle: string | null;
+  }[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const result = await persistence.database.query(
+      `WITH user_clips AS (
+         SELECT c.submitted_by_user_id AS user_id,
+                COUNT(*)::int AS clip_count,
+                AVG(agg.avg_score) FILTER (WHERE agg.rating_count > 0)::float8 AS avg_score
+         FROM public."clip" c
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*) FILTER (WHERE r.score IS NOT NULL) AS rating_count,
+                  AVG(r.score) FILTER (WHERE r.score IS NOT NULL) AS avg_score
+           FROM public."clip_rating" r WHERE r.clip_id = c.id
+         ) agg ON true
+         WHERE c.status = 'approved'
+         GROUP BY c.submitted_by_user_id
+       ),
+       top_clips AS (
+         SELECT DISTINCT ON (c.submitted_by_user_id)
+           c.submitted_by_user_id AS user_id,
+           c.id AS clip_id,
+           c.title AS clip_title
+         FROM public."clip" c
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*) FILTER (WHERE r.score IS NOT NULL) AS rating_count,
+                  AVG(r.score) FILTER (WHERE r.score IS NOT NULL) AS avg_score
+           FROM public."clip_rating" r WHERE r.clip_id = c.id
+         ) agg ON true
+         WHERE c.status = 'approved'
+         ORDER BY c.submitted_by_user_id,
+                  COALESCE(agg.avg_score, 0) DESC NULLS LAST,
+                  agg.rating_count DESC NULLS LAST,
+                  c.created_at DESC
+       )
+       SELECT
+         u.id AS "userId",
+         u.name AS "name",
+         u.display_name AS "displayName",
+         u.avatar_url AS "avatarUrl",
+         uc.clip_count AS "clipCount",
+         uc.avg_score AS "avgScore",
+         tc.clip_id AS "topClipId",
+         tc.clip_title AS "topClipTitle"
+       FROM user_clips uc
+       JOIN public."user" u ON u.id = uc.user_id
+       LEFT JOIN top_clips tc ON tc.user_id = uc.user_id
+       ORDER BY COALESCE(uc.avg_score, 0) * LN(uc.clip_count + 1) DESC,
+                uc.clip_count DESC
+       LIMIT $1`,
+      [safeLimit]
+    );
+    return result.rows;
   }
 
   /** Alle freigegebenen Clips (id + updated_at) für die dynamische Sitemap. */

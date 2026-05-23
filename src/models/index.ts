@@ -422,3 +422,24 @@ export interface ClipReport {
   resolvedAt: Date | null;
   resolvedBy: UUID | null;
 }
+
+export interface ClipComment {
+  id: UUID;
+  clipId: UUID;
+  userId: UUID;
+  body: string;
+  /** Sekunden im Clip — `null` = Kommentar ohne Zeitbezug. */
+  timestampSeconds: number | null;
+  /** Soft-Delete-Marker. Frontend filtert `WHERE deletedAt IS NULL`. */
+  deletedAt: Date | null;
+  deletedByUserId: UUID | null;
+  createdAt: Date;
+  updatedAt: Date | null;
+}
+
+/** Kommentar inkl. Author-Anzeigedaten — Liste auf der Clip-Detailseite. */
+export interface ClipCommentWithAuthor extends ClipComment {
+  authorName: string;
+  authorDisplayName: string | null;
+  authorAvatarUrl: string | null;
+}

@@ -4,6 +4,7 @@ import { csrfTokenHandler } from '../middleware/csrf.js';
 import ogController from '../controllers/og.js';
 import sitemapController from '../controllers/sitemap.js';
 import rssController from '../controllers/rss.js';
+import clipCommentController from '../controllers/clip-comment.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -55,6 +56,11 @@ router.get('/og/blog/:slug', ogController.post);
 router.post('/login', system.loginHandler);
 router.post('/register', system.registerHandler);
 router.post('/logout', system.logoutHandler);
+
+// Soft-Delete für einen Clip-Kommentar. Liegt absichtlich nicht unter
+// `/clips/:id/comments/:cid`, weil der Aufrufer ohnehin nur die Comment-
+// ID hat und der Service den Clip-Kontext intern erschließt.
+router.delete('/comments/:id', system.authHandler, clipCommentController.remove);
 
 router.use('/github', github);
 router.use('/twitch', twitch);
