@@ -97,6 +97,15 @@ const getMe = async (req: Request, res: Response, next: NextFunction) => {
     return next(error.notFound('Authenticated user not found.'));
   }
 
+  // Anonymisiertes Konto: JWT noch technisch gültig, aber die Session
+  // ist tot. Cookie räumen + 401, damit das Frontend in den Logout-
+  // Zustand fällt. Permissions/Social-Links sind beim Anonymisieren
+  // bereits gelöscht.
+  if (data.deletedAt !== null) {
+    res.clearCookie('access_token', { path: '/' });
+    return next(error.unauthorized('Account has been deleted.', 'ACCOUNT_DELETED'));
+  }
+
   const [permissions, socialLinks] = await Promise.all([
     user.getPermissions(req.userId),
     user.listSocialLinks(req.userId)
@@ -210,8 +219,17 @@ const nukeMePlease = async (req: Request, res: Response, next: NextFunction) => 
     return next(error.unauthorized('No authenticated user.'));
   }
 
-  console.info(`User ${req.userId} requested nukeMePlease lol`);
-  await user.deleteUser(req.userId);
+  console.info(`User ${req.userId} requested self-anonymisation`);
+  // Soft-Delete + PII-Wipe statt Hard-Delete. Hängende Clips,
+  // Kommentare und Reports bleiben bestehen und werden als
+  // „Gelöschter Nutzer" angezeigt.
+  await user.anonymizeUser(req.userId);
+
+  // Cookie sofort räumen, damit der nächste Request unauthenticated
+  // ist und das Frontend in den Logout-Zustand fällt. JWT bleibt
+  // technisch noch ~15 min gültig, aber ohne Cookie zieht der Client
+  // ihn nicht mehr.
+  res.clearCookie('access_token', { path: '/' });
   return res.status(204).send();
 };
 
