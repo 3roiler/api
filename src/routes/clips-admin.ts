@@ -37,4 +37,8 @@ router.patch('/categories/:id', clipAdminController.setCategorySection);
 router.get('/moderation-settings', clipAdminController.getModerationSettings);
 router.put('/moderation-settings', clipAdminController.updateModerationSettings);
 
+// „Für dich"-Algorithmus (Gewichte + Schwellen)
+router.get('/foryou-settings', clipAdminController.getForYouSettings);
+router.put('/foryou-settings', clipAdminController.updateForYouSettings);
+
 export default router;

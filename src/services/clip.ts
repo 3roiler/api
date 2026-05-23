@@ -4,6 +4,7 @@ import AppError from './error.js';
 import twitchClip, { parseClipId } from './twitch-clip.js';
 import awardCategory from './award-category.js';
 import settings from './settings.js';
+import { readForYouSettings } from './foryou-settings.js';
 import type {
   Clip,
   ClipAwardTally,
@@ -284,6 +285,7 @@ export class ClipService {
   async listPersonalFeed(userId: string, limit = 12): Promise<ClipWithContext[]> {
     const safeLimit = Math.min(Math.max(limit, 1), 36);
     const M = 5; // Mindeststimmen-Gewicht für die Bayesian-Dämpfung
+    const cfg = await readForYouSettings();
 
     // Globaler Score-Durchschnitt — nur einmal pro Aufruf.
     const avgRes: QueryResult<{ avg: number | null }> = await persistence.database.query(
@@ -298,25 +300,25 @@ export class ClipService {
        JOIN public."clip" c ON c.id = r.clip_id
        WHERE r.user_id = $1::uuid
          AND r.score IS NOT NULL
-         AND r.score >= 3
+         AND r.score >= $2
          AND c.game_id IS NOT NULL
        GROUP BY c.game_id
        ORDER BY COUNT(*) DESC, AVG(r.score) DESC
        LIMIT 6`,
-      [userId]
+      [userId, cfg.minPositiveScore]
     );
     const gameIds = catRes.rows.map((row) => row.gameId).filter(Boolean);
     const primaryIds = gameIds.slice(0, 3);
     const secondaryIds = gameIds.slice(3);
 
-    // Cold-Start: User hat keine ≥-3-Bewertungen. Top-Clips der letzten
-    // 30 Tage mit Recency-Boost, sonst sähe die Empfehlung wie ein
-    // jahrealtes „best of"-Album aus.
+    // Cold-Start: User hat keine ≥-MinScore-Bewertungen. Top-Clips der
+    // konfigurierten Recency-Fenstergröße mit konstantem Boost, sonst
+    // sähe die Empfehlung wie ein jahrealtes „best of"-Album aus.
     if (gameIds.length === 0) {
       const result: QueryResult<ClipCtxRow> = await persistence.database.query(
         `${CLIP_CTX_SELECT}
          WHERE c.status = 'approved'
-           AND c.created_at >= NOW() - INTERVAL '30 days'
+           AND c.created_at >= NOW() - make_interval(days => $5::int)
            AND c.submitted_by_user_id <> $1::uuid
          ORDER BY (
              COALESCE(agg.rating_count, 0)::float8
@@ -325,24 +327,22 @@ export class ClipService {
            + ($2::float8 / (COALESCE(agg.rating_count, 0) + $2)) * $3
            + GREATEST(
                0,
-               1.0 - EXTRACT(EPOCH FROM (NOW() - c.created_at)) / (30 * 86400)
+               1.0 - EXTRACT(EPOCH FROM (NOW() - c.created_at)) / ($5::float8 * 86400)
              ) * 1.5
            DESC
          LIMIT $4::int`,
-        [userId, M, globalAvg, safeLimit]
+        [userId, M, globalAvg, safeLimit, cfg.recencyWindowDays]
       );
       const rows = this.withAwardsStub(result.rows);
       if (rows.length > 0) {
         await this.attachAwards(rows);
         return rows;
       }
-      // Wirklich nichts in den letzten 30 Tagen — Allzeit-Leaderboard
-      // ist der allerletzte Fallback.
       return this.leaderboard({ limit: safeLimit });
     }
 
-    // Personalisiertes Scoring. matching_signal kommt aus zwei
-    // konditionalen Tests gegen die User-Kategorien.
+    // Personalisiertes Scoring mit den eingestellten Gewichten und dem
+    // konfigurierten Frische-Pool (zusätzliches OR im WHERE).
     const result: QueryResult<ClipCtxRow> = await persistence.database.query(
       `${CLIP_CTX_SELECT}
        WHERE c.status = 'approved'
@@ -354,11 +354,7 @@ export class ClipService {
          AND (
            c.game_id = ANY($2::text[])
            OR c.game_id = ANY($3::text[])
-           -- Letztes Sprungbrett: ohne Kategorie-Match landen nur Clips
-           -- der letzten 14 Tage in der Ergebnismenge — der Pool bleibt
-           -- klein genug, dass Personalisierung nicht zerschossen wird,
-           -- aber frische Einreichungen bekommen eine echte Chance.
-           OR c.created_at >= NOW() - INTERVAL '14 days'
+           OR c.created_at >= NOW() - make_interval(days => $9::int)
          )
        ORDER BY (
            CASE
@@ -366,25 +362,37 @@ export class ClipService {
              WHEN c.game_id = ANY($3::text[]) THEN 0.5
              ELSE 0.0
            END
-         ) * 0.55
+         ) * $6
          + (
              (COALESCE(agg.rating_count, 0)::float8
                / (COALESCE(agg.rating_count, 0) + $4))
              * COALESCE(agg.avg_score, 0)
              + ($4::float8 / (COALESCE(agg.rating_count, 0) + $4)) * $5
-           ) / 5.0 * 0.30
+           ) / 5.0 * $7
          + GREATEST(
              0,
-             1.0 - EXTRACT(EPOCH FROM (NOW() - c.created_at)) / (30 * 86400)
-           ) * 0.15
+             1.0 - EXTRACT(EPOCH FROM (NOW() - c.created_at)) / ($10::float8 * 86400)
+           ) * $8
          DESC,
          agg.rating_count DESC NULLS LAST
-       LIMIT $6::int`,
-      [userId, primaryIds, secondaryIds, M, globalAvg, safeLimit]
+       LIMIT $11::int`,
+      [
+        userId,
+        primaryIds,
+        secondaryIds,
+        M,
+        globalAvg,
+        cfg.weightMatching,
+        cfg.weightQuality,
+        cfg.weightRecency,
+        cfg.freshnessPoolDays,
+        cfg.recencyWindowDays,
+        safeLimit
+      ]
     );
     const rows = this.withAwardsStub(result.rows);
     if (rows.length === 0) {
-      return this.leaderboard({ limit: safeLimit, periodDays: 30 });
+      return this.leaderboard({ limit: safeLimit, periodDays: cfg.recencyWindowDays });
     }
     await this.attachAwards(rows);
     return rows;
