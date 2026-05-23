@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { system } from '../services/index.js';
 import adminController from '../controllers/admin.js';
+import dashboardStatsController from '../controllers/dashboard-stats.js';
 import requirePermission from '../middleware/requirePermission.js';
 import settingsRouter from './settings.js';
 import metricsRouter from './metrics.js';
@@ -29,6 +30,17 @@ router.use('/metrics', metricsRouter);
 // daher NICHT über den umbrella `adminGate` — so kann ein reiner
 // Clip-Moderator ohne User-CRUD-Rechte existieren.
 router.use('/streamclips', clipsAdminRouter);
+
+// Aggregate-Counts für das Dashboard-Widget-Board. Gegated auf
+// `dashboard.view` — wer das Dashboard sieht, sieht auch die Zahlen.
+// Die Cards im Frontend werden zusätzlich pro Permission gefiltert
+// (z. B. Blog-Drafts-Count nur für `dashboard.blog`).
+router.get(
+  '/dashboard-stats',
+  system.authHandler,
+  requirePermission('dashboard.view'),
+  dashboardStatsController.stats
+);
 
 // ─── Permissions catalog ────────────────────────────────────────────────
 router.get('/permissions', ...adminGate, adminController.listPermissions);

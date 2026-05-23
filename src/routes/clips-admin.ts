@@ -13,6 +13,10 @@ router.use(system.authHandler, requirePermission('clips.moderate'));
 
 // Moderations-Queue
 router.get('/clips', clipAdminController.moderationQueue);
+// Bulk-Moderation. Muss VOR `/clips/:id` registriert sein, sonst fängt
+// die :id-Route den Pfad ab und versucht „bulk-moderate" als UUID zu
+// parsen.
+router.post('/clips/bulk-moderate', clipAdminController.bulkModerate);
 router.patch('/clips/:id', clipAdminController.setStatus);
 
 // Award-Kategorien

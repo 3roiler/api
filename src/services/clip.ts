@@ -220,6 +220,101 @@ export class ClipService {
     return rows[0];
   }
 
+  /**
+   * Weitere freigegebene Clips desselben Broadcasters — für das
+   * „Mehr von diesem Streamer"-Karussell auf der Clip-Detailseite.
+   * `excludeId` blendet den gerade angezeigten Clip aus; ohne den Filter
+   * würde der User sich selbst empfohlen bekommen.
+   */
+  async listByBroadcaster(
+    broadcasterId: string,
+    opts: { excludeId?: string; limit?: number } = {}
+  ): Promise<ClipWithContext[]> {
+    const limit = Math.min(opts.limit ?? 8, 24);
+    const params: unknown[] = [broadcasterId];
+    let excludeClause = '';
+    if (opts.excludeId) {
+      params.push(opts.excludeId);
+      excludeClause = `AND c.id <> $${params.length}::uuid`;
+    }
+    params.push(limit);
+    const result: QueryResult<ClipCtxRow> = await persistence.database.query(
+      `${CLIP_CTX_SELECT}
+       WHERE c.status = 'approved'
+         AND c.broadcaster_id = $1
+         ${excludeClause}
+       ORDER BY COALESCE(agg.avg_score, 0) DESC NULLS LAST, agg.rating_count DESC, c.created_at DESC
+       LIMIT $${params.length}`,
+      params
+    );
+    const rows = this.withAwardsStub(result.rows);
+    await this.attachAwards(rows);
+    return rows;
+  }
+
+  /**
+   * Personalisierter „Für dich"-Feed. Algorithmus:
+   *   1. Top-Kategorien aus den positiv (≥ 3 Sterne) bewerteten Clips
+   *      des Users — die räumen für sich allein schon den Beigeschmack
+   *      „der mag das"-Signal ein.
+   *   2. Top-Clips aus diesen Kategorien, die der User noch nicht
+   *      bewertet hat und die er nicht selbst eingereicht hat.
+   *   3. Fallback wenn (1) leer ist: Top-Clips der letzten 30 Tage
+   *      (Bayesian Leaderboard).
+   *
+   * Bewusst keine Vector-Embeddings, keine Collab-Filter, kein
+   * Trending-Score — das wäre erst sinnvoll, wenn wir 100× mehr
+   * Clips/Ratings haben. Diese Variante kommt mit zwei DB-Queries
+   * aus und liefert Empfehlungen, die der User nachvollziehen kann.
+   */
+  async listPersonalFeed(userId: string, limit = 12): Promise<ClipWithContext[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 36);
+
+    const catRes: QueryResult<{ gameId: string }> = await persistence.database.query(
+      `SELECT c.game_id AS "gameId"
+       FROM public."clip_rating" r
+       JOIN public."clip" c ON c.id = r.clip_id
+       WHERE r.user_id = $1::uuid
+         AND r.score IS NOT NULL
+         AND r.score >= 3
+         AND c.game_id IS NOT NULL
+       GROUP BY c.game_id
+       ORDER BY COUNT(*) DESC, AVG(r.score) DESC
+       LIMIT 6`,
+      [userId]
+    );
+    const gameIds = catRes.rows.map((row) => row.gameId).filter(Boolean);
+
+    if (gameIds.length === 0) {
+      return this.leaderboard({ limit: safeLimit, periodDays: 30 });
+    }
+
+    const result: QueryResult<ClipCtxRow> = await persistence.database.query(
+      `${CLIP_CTX_SELECT}
+       WHERE c.status = 'approved'
+         AND c.game_id = ANY($1::text[])
+         AND c.submitted_by_user_id <> $2::uuid
+         AND NOT EXISTS (
+           SELECT 1 FROM public."clip_rating" r
+           WHERE r.clip_id = c.id AND r.user_id = $2::uuid
+         )
+       ORDER BY COALESCE(agg.avg_score, 0) DESC NULLS LAST,
+                agg.rating_count DESC,
+                c.created_at DESC
+       LIMIT $3::int`,
+      [gameIds, userId, safeLimit]
+    );
+    const rows = this.withAwardsStub(result.rows);
+    if (rows.length === 0) {
+      // Top-Kategorien hatten keine neuen Clips → wir geben dem User
+      // wenigstens den allgemeinen Top-30-Tage-Schnitt zurück, damit der
+      // Feed nicht ganz leer ist.
+      return this.leaderboard({ limit: safeLimit, periodDays: 30 });
+    }
+    await this.attachAwards(rows);
+    return rows;
+  }
+
   /** Alle freigegebenen Clips (id + updated_at) für die dynamische Sitemap. */
   async listApprovedForSitemap(): Promise<{ id: string; updatedAt: Date | null }[]> {
     const result: QueryResult<{ id: string; updatedAt: Date | null }> =
