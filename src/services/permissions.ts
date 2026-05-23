@@ -39,7 +39,7 @@ export const PERMISSIONS: readonly PermissionDefinition[] = [
   // Dashboard-Sektion frei.
   { key: 'dashboard.clips', description: 'Streamclips-Bereich im Dashboard (Moderation, Awards, Sektionen, Meldungen).' },
   { key: 'clips.submit', description: 'Twitch-Clips bei Streamclips einreichen.' },
-  { key: 'clips.moderate', description: 'Clips freigeben/ablehnen, Award-Kategorien und Sektionen verwalten, Meldungen bearbeiten.' }
+  { key: 'clips.moderate', description: 'Clips freigeben/ablehnen, Award-Kategorien und Sektionen verwalten, Meldungen + Kommentare moderieren.' }
 ] as const;
 
 const PERMISSION_KEYS = new Set(PERMISSIONS.map(p => p.key));
