@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { system } from '../services/index.js';
 import requirePermission from '../middleware/requirePermission.js';
 import clipController from '../controllers/clip.js';
-import clipCommentController from '../controllers/clip-comment.js';
+import commentController from '../controllers/comment.js';
 
 /**
  * `/api/clips` — Streamclips-Kernrouten. Auth ist hier pro Route gesetzt
@@ -38,8 +38,8 @@ router.post('/:id/report', system.authHandler, clipController.report);
 
 // Kommentare — list ist public, post braucht Login. Delete liegt unter
 // `/comments/:id` (ohne Clip-Präfix) im root router.
-router.get('/:id/comments', clipCommentController.list);
-router.post('/:id/comments', system.authHandler, clipCommentController.create);
+router.get('/:id/comments', commentController.listClipComments);
+router.post('/:id/comments', system.authHandler, commentController.createClipComment);
 
 // Clip-Detail ist öffentlich; der optionale Auth füllt `myRating`, wenn
 // der Aufrufer eingeloggt ist.

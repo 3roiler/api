@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { system } from '../services/index.js';
 import requirePermission from '../middleware/requirePermission.js';
 import clipAdminController from '../controllers/clip-admin.js';
+import commentController from '../controllers/comment.js';
 
 /**
  * Streamclips-Moderation, gemountet unter `/api/admin/streamclips`.
@@ -40,5 +41,12 @@ router.put('/moderation-settings', clipAdminController.updateModerationSettings)
 // „Für dich"-Algorithmus (Gewichte + Schwellen)
 router.get('/foryou-settings', clipAdminController.getForYouSettings);
 router.put('/foryou-settings', clipAdminController.updateForYouSettings);
+
+// Kommentar-Mute (User vom Kommentieren ausschließen, mit Begründung und
+// optionalem Ablaufdatum). Permissions werden vom Controller geprüft —
+// das Sub-Router-Gate `clips.moderate` greift bereits am Mount oben.
+router.get('/mutes', commentController.listMutes);
+router.post('/users/:id/mute', commentController.muteUser);
+router.delete('/users/:id/mute', commentController.unmuteUser);
 
 export default router;

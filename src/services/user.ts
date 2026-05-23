@@ -11,9 +11,15 @@ const USER_COLUMNS = `
   display_name AS "displayName",
   email,
   avatar_url AS "avatarUrl",
+  deleted_at AS "deletedAt",
   created_at AS "createdAt",
   updated_at AS "updatedAt"
 `;
+
+/** Anzeigename + Avatar-Override für anonymisierte User. Wird vom
+ *  Service in `displayName` und `name` geschrieben; das Frontend
+ *  rendert genau diesen Text, kein zusätzliches Mapping nötig. */
+export const ANONYMIZED_NAME = 'Gelöschter Nutzer';
 
 export interface CreateUserOptions {
   name: string;
@@ -393,6 +399,67 @@ export class UserService {
     return result.rows[0] ?? null;
   }
 
+  /**
+   * Anonymisiert den User: PII wird genullt/auf Platzhalter gesetzt,
+   * `deleted_at` markiert das Konto als gelöscht. Foreign-Keys aus
+   * Clips/Kommentaren/Reports bleiben intakt — sie zeigen ab dann auf
+   * den anonymisierten User, der frontend-seitig als „Gelöschter Nutzer"
+   * gerendert wird. KEIN Hard-Delete: bestehende Beiträge sind sonst
+   * weg, das wäre Datenverlust für die Community.
+   *
+   * Idempotent: zweites Aufrufen ist kein Fehler (deleted_at bleibt der
+   * ursprüngliche Zeitpunkt, restliche Felder werden re-normalisiert).
+   */
+  async anonymizeUser(id: string): Promise<boolean> {
+    // Twitch-OAuth-Token zuerst killen, damit der User keine neue
+    // Session über Refresh ziehen kann. Cascade FK würde das auch
+    // beim Hard-Delete tun, beim Soft-Delete macht das aber niemand
+    // für uns.
+    await persistence.database.query(
+      `DELETE FROM public."twitch_token" WHERE user_id = $1`,
+      [id]
+    );
+    // User-Permissions kommen mit raus — ein gelöschter User soll
+    // beim eventuellen Re-Login nicht plötzlich seine alten Rechte
+    // wieder haben (Spam/Mod-Bypass-Vektor).
+    await persistence.database.query(
+      `DELETE FROM public."user_permission" WHERE user_id = $1`,
+      [id]
+    );
+    await persistence.database.query(
+      `DELETE FROM public."user_group" WHERE user_id = $1`,
+      [id]
+    );
+    // Social-Links und Mute-Einträge auch — gehören zum gelöschten
+    // Profil und haben in der Public-Darstellung nichts mehr verloren.
+    await persistence.database.query(
+      `DELETE FROM public."social_link" WHERE user_id = $1`,
+      [id]
+    );
+    await persistence.database.query(
+      `DELETE FROM public."comment_mute" WHERE user_id = $1`,
+      [id]
+    );
+
+    const result = await persistence.database.query(
+      `UPDATE public."user"
+       SET
+         name = $2,
+         display_name = $2,
+         email = NULL,
+         github_id = NULL,
+         twitch_id = NULL,
+         avatar_url = NULL,
+         deleted_at = COALESCE(deleted_at, NOW()),
+         updated_at = NOW()
+       WHERE id = $1`,
+      [id, ANONYMIZED_NAME]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Behalten für Migrations- und Test-Zwecke. Produktion nutzt
+   *  `anonymizeUser`. */
   async deleteUser(id: string): Promise<boolean> {
     const result = await persistence.database.query('DELETE FROM public."user" WHERE id = $1', [id]);
     return (result.rowCount ?? 0) > 0;

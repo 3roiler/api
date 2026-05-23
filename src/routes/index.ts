@@ -4,7 +4,7 @@ import { csrfTokenHandler } from '../middleware/csrf.js';
 import ogController from '../controllers/og.js';
 import sitemapController from '../controllers/sitemap.js';
 import rssController from '../controllers/rss.js';
-import clipCommentController from '../controllers/clip-comment.js';
+import commentController from '../controllers/comment.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -57,10 +57,11 @@ router.post('/login', system.loginHandler);
 router.post('/register', system.registerHandler);
 router.post('/logout', system.logoutHandler);
 
-// Soft-Delete für einen Clip-Kommentar. Liegt absichtlich nicht unter
-// `/clips/:id/comments/:cid`, weil der Aufrufer ohnehin nur die Comment-
-// ID hat und der Service den Clip-Kontext intern erschließt.
-router.delete('/comments/:id', system.authHandler, clipCommentController.remove);
+// Kommentare (Clip + Blog teilen denselben Endpunkt-Satz). Der Service
+// kennt die Polymorphie, die Route nur die UUID.
+router.delete('/comments/:id', system.authHandler, commentController.remove);
+router.patch('/comments/:id/moderate', system.authHandler, commentController.moderateDelete);
+router.patch('/comments/:id/restore', system.authHandler, commentController.restore);
 
 router.use('/github', github);
 router.use('/twitch', twitch);

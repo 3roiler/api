@@ -7,6 +7,11 @@ export interface User {
   email: string | null;
   twitchId: string | null;
   avatarUrl: string | null;
+  /** Zeitpunkt der Self-Anonymisierung. NULL = aktiver User.
+   *  Bei gesetzt: PII ist genullt, Name + DisplayName lauten
+   *  „Gelöschter Nutzer", Login ist gesperrt. Verknüpfte Daten
+   *  (Clips, Kommentare, etc.) bleiben sichtbar. */
+  deletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -423,23 +428,40 @@ export interface ClipReport {
   resolvedBy: UUID | null;
 }
 
-export interface ClipComment {
+export type CommentTargetType = 'clip' | 'blog_post';
+
+export interface Comment {
   id: UUID;
-  clipId: UUID;
+  parentCommentId: UUID | null;
+  targetType: CommentTargetType;
+  targetId: UUID;
   userId: UUID;
   body: string;
-  /** Sekunden im Clip — `null` = Kommentar ohne Zeitbezug. */
+  /** Sekunden im Clip — `null` für Blog-Posts oder Clip-Kommentare
+   *  ohne Zeitbezug. */
   timestampSeconds: number | null;
-  /** Soft-Delete-Marker. Frontend filtert `WHERE deletedAt IS NULL`. */
+  /** Soft-Delete-Marker. */
   deletedAt: Date | null;
   deletedByUserId: UUID | null;
+  /** Wenn Moderator gelöscht hat: Grund. Bei Self-Delete NULL. */
+  deletionReason: string | null;
   createdAt: Date;
   updatedAt: Date | null;
 }
 
-/** Kommentar inkl. Author-Anzeigedaten — Liste auf der Clip-Detailseite. */
-export interface ClipCommentWithAuthor extends ClipComment {
+/** Kommentar inkl. Author-Anzeigedaten. Author kann anonymisiert sein
+ *  (`authorDeletedAt` gesetzt) — Frontend zeigt dann „Gelöschter Nutzer". */
+export interface CommentWithAuthor extends Comment {
   authorName: string;
   authorDisplayName: string | null;
   authorAvatarUrl: string | null;
+  authorDeletedAt: Date | null;
+}
+
+export interface CommentMute {
+  userId: UUID;
+  reason: string;
+  mutedByUserId: UUID;
+  mutedUntil: Date | null;
+  createdAt: Date;
 }
