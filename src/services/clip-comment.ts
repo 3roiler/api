@@ -17,7 +17,11 @@ import type { ClipComment, ClipCommentWithAuthor } from '../models/index.js';
  *    macht echte Diskussion mit Antwort + Korrektur unmöglich.
  */
 
-const COMMENT_COLUMNS = `
+// Aliased Variante für JOIN-Selects, Plain für `RETURNING` aus dem
+// INSERT (das keinen Tabellen-Alias hat). Postgres würde sonst beim
+// INSERT … RETURNING gegen `c.id` mit „missing FROM-clause entry"
+// streiken.
+const COMMENT_COLUMNS_ALIASED = `
   c.id,
   c.clip_id AS "clipId",
   c.user_id AS "userId",
@@ -29,8 +33,20 @@ const COMMENT_COLUMNS = `
   c.updated_at AS "updatedAt"
 `;
 
+const COMMENT_COLUMNS_PLAIN = `
+  id,
+  clip_id AS "clipId",
+  user_id AS "userId",
+  body,
+  timestamp_seconds::float8 AS "timestampSeconds",
+  deleted_at AS "deletedAt",
+  deleted_by_user_id AS "deletedByUserId",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt"
+`;
+
 const COMMENT_WITH_AUTHOR_SELECT = `
-  SELECT ${COMMENT_COLUMNS},
+  SELECT ${COMMENT_COLUMNS_ALIASED},
     u.name AS "authorName",
     u.display_name AS "authorDisplayName",
     u.avatar_url AS "authorAvatarUrl"
@@ -92,7 +108,7 @@ export class ClipCommentService {
     const result: QueryResult<ClipComment> = await persistence.database.query(
       `INSERT INTO public."clip_comment" (clip_id, user_id, body, timestamp_seconds)
        VALUES ($1::uuid, $2::uuid, $3, $4)
-       RETURNING ${COMMENT_COLUMNS}`,
+       RETURNING ${COMMENT_COLUMNS_PLAIN}`,
       [clipId, userId, trimmed, timestampSeconds]
     );
     return result.rows[0];
