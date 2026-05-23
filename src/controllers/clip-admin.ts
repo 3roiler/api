@@ -6,7 +6,16 @@ import {
   settings as settingsService
 } from '../services/index.js';
 import clipReportService from '../services/clip-report.js';
-import AppError from '../services/error.js';
+import {
+  readForYouSettings,
+  SETTING_FORYOU_W_MATCHING,
+  SETTING_FORYOU_W_QUALITY,
+  SETTING_FORYOU_W_RECENCY,
+  SETTING_FORYOU_RECENCY_DAYS,
+  SETTING_FORYOU_FRESH_DAYS,
+  SETTING_FORYOU_MIN_SCORE
+} from '../services/foryou-settings.js';
+import AppError, { AppError as AppErrorClass } from '../services/error.js';
 import type { ClipStatus, ClipReportStatus, ClipSection } from '../models/index.js';
 
 const SETTING_DAILY_LIMIT = 'clips.auto_approve_daily_limit';
@@ -26,6 +35,7 @@ async function readModerationSettings(): Promise<{
   ]);
   return { autoApproveDailyLimit, requireReviewAll, reviewSections };
 }
+
 
 const VALID_SECTIONS: ClipSection[] = [
   'gaming', 'just_chatting', 'irl', 'music', 'esports', 'creative', 'other'
@@ -345,6 +355,80 @@ const updateModerationSettings = async (req: Request, res: Response, next: NextF
   }
 };
 
+// ─── „Für dich"-Algorithmus-Einstellungen ─────────────────────────────────────
+
+/** GET /foryou-settings */
+const getForYouSettings = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return res.status(200).json(await readForYouSettings());
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * Helper: validiert einen Slider-Wert (0 … 1). Setter-Pattern wie bei
+ * den Moderations-Einstellungen.
+ */
+function validateWeight(value: unknown, field: string): number | AppErrorClass {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    return AppError.badRequest(`${field} muss eine Zahl 0…1 sein.`, 'BAD_WEIGHT');
+  }
+  return value;
+}
+
+function validateIntInRange(value: unknown, field: string, min: number, max: number): number | AppErrorClass {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    return AppError.badRequest(`${field} muss eine ganze Zahl ${min}…${max} sein.`, 'BAD_RANGE');
+  }
+  return value;
+}
+
+/**
+ * PUT /foryou-settings — Body (alle optional):
+ * { weightMatching, weightQuality, weightRecency,
+ *   recencyWindowDays, freshnessPoolDays, minPositiveScore }
+ */
+const updateForYouSettings = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = requireUser(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const updates: { key: string; value: number }[] = [];
+    const tryWeight = (bodyKey: string, settingKey: string) => {
+      if (body[bodyKey] === undefined) return null;
+      const v = validateWeight(body[bodyKey], bodyKey);
+      if (v instanceof AppErrorClass) return v;
+      updates.push({ key: settingKey, value: v });
+      return null;
+    };
+    const tryInt = (bodyKey: string, settingKey: string, min: number, max: number) => {
+      if (body[bodyKey] === undefined) return null;
+      const v = validateIntInRange(body[bodyKey], bodyKey, min, max);
+      if (v instanceof AppErrorClass) return v;
+      updates.push({ key: settingKey, value: v });
+      return null;
+    };
+
+    const errs = [
+      tryWeight('weightMatching', SETTING_FORYOU_W_MATCHING),
+      tryWeight('weightQuality', SETTING_FORYOU_W_QUALITY),
+      tryWeight('weightRecency', SETTING_FORYOU_W_RECENCY),
+      tryInt('recencyWindowDays', SETTING_FORYOU_RECENCY_DAYS, 1, 365),
+      tryInt('freshnessPoolDays', SETTING_FORYOU_FRESH_DAYS, 1, 90),
+      tryInt('minPositiveScore', SETTING_FORYOU_MIN_SCORE, 1, 5)
+    ];
+    for (const e of errs) if (e !== null) return next(e);
+
+    for (const u of updates) {
+      await settingsService.upsertSetting(u.key, { value: u.value, updatedBy: userId });
+    }
+    return res.status(200).json(await readForYouSettings());
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export default {
   moderationQueue,
   setStatus,
@@ -358,5 +442,7 @@ export default {
   listCategories,
   setCategorySection,
   getModerationSettings,
-  updateModerationSettings
+  updateModerationSettings,
+  getForYouSettings,
+  updateForYouSettings
 };
