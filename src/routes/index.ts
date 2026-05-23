@@ -3,6 +3,7 @@ import { system } from '../services';
 import { csrfTokenHandler } from '../middleware/csrf.js';
 import ogController from '../controllers/og.js';
 import sitemapController from '../controllers/sitemap.js';
+import rssController from '../controllers/rss.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -40,6 +41,11 @@ router.get('/csrf', csrfTokenHandler);
 
 // Dynamische sitemap.xml (Caddy proxyt /sitemap.xml hierher). Öffentlich.
 router.get('/sitemap.xml', sitemapController.sitemap);
+
+// Dynamischer RSS-Feed für den Blog. Caddy proxyt /blog/rss.xml hierher;
+// muss VOR `router.use('/blog', blog)` registriert sein, sonst fängt der
+// Blog-Router das ab und versucht „rss.xml" als Post-Slug zu interpretieren.
+router.get('/blog/rss.xml', rssController.feed);
 
 // Open-Graph für Social-Crawler (Caddy leitet nur Crawler-UAs hierher um).
 // Öffentlich + nur lesend; rendert serverseitig Meta-Tags für teilbare Seiten.
