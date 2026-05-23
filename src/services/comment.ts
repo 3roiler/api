@@ -129,16 +129,19 @@ export class CommentService {
       throw AppError.forbidden(reason, 'USER_MUTED');
     }
 
-    // Parent-Validierung bei Reply.
+    // Parent-Validierung bei Reply. Echte Reddit-Style-Tiefe — wir
+    // erzwingen nur, dass der Parent zum selben Target gehört
+    // (kein Cross-Posting). Die visuelle Indentierung wird vom
+    // Frontend bei einer gewissen Tiefe gecappt, damit lange
+    // Diskussionen auf mobilen Viewports lesbar bleiben — logisch
+    // bleibt der Baum aber komplett.
     if (input.parentCommentId !== null) {
       const parentRes = await persistence.database.query<{
         targetType: CommentTargetType;
         targetId: string;
-        parentParentId: string | null;
       }>(
         `SELECT target_type AS "targetType",
-                target_id AS "targetId",
-                parent_comment_id AS "parentParentId"
+                target_id AS "targetId"
          FROM public."comment"
          WHERE id = $1::uuid`,
         [input.parentCommentId]
@@ -149,14 +152,6 @@ export class CommentService {
       }
       if (parent.targetType !== input.targetType || parent.targetId !== input.targetId) {
         throw AppError.badRequest('Eltern-Kommentar gehört zu einem anderen Beitrag.', 'PARENT_MISMATCH');
-      }
-      // Wir erlauben nur 1 Verschachtelungs-Ebene — Replies auf Replies
-      // werden flach an den ursprünglichen Top-Kommentar angeheftet. So
-      // bleibt das Frontend einfach und der Thread lesbar (Reddit-Style
-      // hat oft zu viele Indents bei Streit-Threads).
-      if (parent.parentParentId !== null) {
-        // Re-target: das Reply geht an den top-level parent stattdessen
-        input.parentCommentId = parent.parentParentId;
       }
     }
 
