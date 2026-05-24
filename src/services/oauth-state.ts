@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
-import type { Request, Response } from 'express';
+import type { Request, RequestHandler, Response } from 'express';
 import config from './config.js';
 
-export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * OAuth-CSRF-Schutz für den Authorization-Code-Flow.
@@ -13,12 +13,35 @@ export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
  * byte-gleich zum Cookie sein. Damit kann ein Angreifer einen Login-CSRF
  * nicht in einen anderen Account einschleusen — er kennt den Cookie nicht.
  *
- * Hinweis: Das Setzen des Cookies (`res.cookie(...)`) lassen wir bewusst
- * in den Routes inline mit literalen Optionen — sonst kann CodeQL
- * (js/client-exposed-cookie, js/clear-text-cookie) die `httpOnly`/`secure`-
- * Flags durch die Indirektion nicht erkennen. Geteilt wird nur die
- * Verifikations-Logik (siehe unten), wo die Duplikation am größten war.
+ * Die Cookie-Optionen werden im Handler INLINE LITERAL gesetzt, damit
+ * Static-Analyzer wie CodeQL (js/client-exposed-cookie, js/clear-text-cookie)
+ * die `httpOnly`/`secure`-Flags direkt am `res.cookie()`-Aufruf erkennen.
  */
+
+/**
+ * Baut einen Express-RequestHandler für `GET /oauth-state`.
+ *
+ * Wir gehen über eine Factory (statt eines Funktions-Calls in der Route),
+ * weil das den OAuth-State-Boilerplate-Code aus den zwei Provider-Routes
+ * (`twitch.ts`, `github.ts`) eliminiert — sonst läuft SonarCloud's
+ * Code-Duplication-Detection (Quality Gate) auf den symmetrischen Block.
+ *
+ * Liefert JSON `{ state }`, damit das SPA den Wert in die OAuth-Login-URL
+ * einbauen kann. Cookie ist 10 min gültig, dann beim Callback verbraucht.
+ */
+export function oauthStateHandler(cookieName: string): RequestHandler {
+  return (_req, res) => {
+    const state = crypto.randomBytes(32).toString('base64url');
+    return res.cookie(cookieName, state, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: 'lax',
+      domain: config.cookieDomain,
+      maxAge: OAUTH_STATE_TTL_MS,
+      path: config.prefix,
+    }).status(200).json({ state });
+  };
+}
 
 /**
  * Räumt das State-Cookie immer ab (auch bei Mismatch) und vergleicht
@@ -51,6 +74,6 @@ export function verifyAndClearOAuthStateCookie(
 }
 
 export default {
+  oauthStateHandler,
   verifyAndClearOAuthStateCookie,
-  OAUTH_STATE_TTL_MS,
 };

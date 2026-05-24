@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import crypto from 'node:crypto';
 import { config, user as userService } from '../services';
 import auth from '../services/auth.js';
 import AppError from '../services/error';
 import system from '../services/system.js';
-import { verifyAndClearOAuthStateCookie, OAUTH_STATE_TTL_MS } from '../services/oauth-state.js';
+import { oauthStateHandler, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
 
 const router = Router();
 
@@ -35,30 +34,10 @@ async function getTwitchUserInfo(accessToken: string, clientId: string) {
   return data.data[0];
 }
 
-/**
- * GET /api/twitch/oauth-state
- *
- * Serverseitig generierter OAuth-State (CSRF-Schutz für den OAuth-Code-Flow).
- * Wert kommt sowohl ins HttpOnly-Cookie als auch in den JSON-Body, damit das
- * SPA es zur Authorization-URL als `state`-Param mitschicken kann. Beim
- * Callback (`POST /oauth`) vergleichen wir Body vs Cookie timing-safe.
- *
- * Auth bewusst optional: anonyme Nutzer:innen sollen sich einloggen können.
- */
-router.get('/oauth-state', (_req, res) => {
-  const state = crypto.randomBytes(32).toString('base64url');
-  // Cookie-Optionen bewusst inline — CodeQL (js/client-exposed-cookie,
-  // js/clear-text-cookie) erkennt `httpOnly`/`secure` nur literal am
-  // `res.cookie()`-Aufruf.
-  return res.cookie(OAUTH_STATE_COOKIE, state, {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
-    domain: config.cookieDomain,
-    maxAge: OAUTH_STATE_TTL_MS,
-    path: config.prefix,
-  }).status(200).json({ state });
-});
+// GET /api/twitch/oauth-state — siehe `services/oauth-state.ts` für das
+// CSRF-Pattern. Auth bewusst optional (anonyme Nutzer:innen loggen sich
+// ein), Rate-Limit greift in `app.ts`.
+router.get('/oauth-state', oauthStateHandler(OAUTH_STATE_COOKIE));
 
 /**
  * POST /api/twitch/oauth

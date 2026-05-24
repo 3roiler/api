@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import crypto from 'node:crypto';
 import { config, user as userService, bootstrap } from '../services/index.js';
 import auth from '../services/auth.js';
 import AppError from '../services/error.js';
-import { verifyAndClearOAuthStateCookie, OAUTH_STATE_TTL_MS } from '../services/oauth-state.js';
+import { oauthStateHandler, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
 
 const router = Router();
 
@@ -89,30 +88,9 @@ function isGithubHostedAvatar(value: string): boolean {
   }
 }
 
-/**
- * GET /api/github/oauth-state
- *
- * Serverseitig generierter OAuth-State (CSRF-Schutz für den OAuth-Code-Flow).
- * Wert kommt sowohl ins HttpOnly-Cookie als auch in den JSON-Body, damit das
- * SPA es zur Authorization-URL als `state`-Param mitschicken kann. Beim
- * Callback (`POST /oauth`) vergleichen wir Body vs Cookie timing-safe.
- *
- * Auth bewusst optional: anonyme Nutzer:innen sollen sich einloggen können.
- */
-router.get('/oauth-state', (_req, res) => {
-  const state = crypto.randomBytes(32).toString('base64url');
-  // Cookie-Optionen bewusst inline — CodeQL (js/client-exposed-cookie,
-  // js/clear-text-cookie) erkennt `httpOnly`/`secure` nur literal am
-  // `res.cookie()`-Aufruf.
-  return res.cookie(OAUTH_STATE_COOKIE, state, {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
-    domain: config.cookieDomain,
-    maxAge: OAUTH_STATE_TTL_MS,
-    path: config.prefix,
-  }).status(200).json({ state });
-});
+// GET /api/github/oauth-state — siehe `services/oauth-state.ts` für das
+// CSRF-Pattern. Rate-Limit greift in `app.ts`.
+router.get('/oauth-state', oauthStateHandler(OAUTH_STATE_COOKIE));
 
 router.post("/oauth", async (req, res, next) => {
   const { code, state } = req.body;
