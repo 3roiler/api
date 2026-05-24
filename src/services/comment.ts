@@ -283,18 +283,41 @@ export class CommentService {
   }
 
   /**
-   * Wiederherstellen — nur durch Mods. Archiviert den letzten
-   * Lösch-Grund in `last_deletion_reason` und stempelt
-   * `restored_at` + `restored_by_user_id`, damit die Mod-Aktion
-   * nachvollziehbar bleibt (vorher ging der Audit komplett verloren).
+   * Wiederherstellen — nur durch Mods, NUR für Mod-Deletes. Self-
+   * Deletes (Author hat seinen eigenen Comment zurückgezogen) dürfen
+   * NICHT durch einen Mod überschrieben werden — das wäre eine
+   * Verletzung des Author-Intents (Datenschutz / „Recht auf
+   * Vergessen" auf eigene Beiträge). Falls ein Mod meint, das müsse
+   * rückgängig gemacht werden, geht das nur direkt mit dem Author.
+   *
+   * Archiviert den vorherigen `deletion_reason` in
+   * `last_deletion_reason` + stempelt `restored_at` / `_by`.
    */
   async restore(commentId: string, moderatorId: string): Promise<void> {
-    const exists = await persistence.database.query(
-      `SELECT 1 FROM public."comment" WHERE id = $1::uuid`,
+    const lookup = await persistence.database.query<{
+      deletedAt: Date | null;
+      deletionReason: string | null;
+    }>(
+      `SELECT deleted_at AS "deletedAt",
+              deletion_reason AS "deletionReason"
+       FROM public."comment"
+       WHERE id = $1::uuid`,
       [commentId]
     );
-    if (exists.rowCount === 0) {
+    const row = lookup.rows[0];
+    if (!row) {
       throw AppError.notFound('Kommentar nicht gefunden.', 'COMMENT_NOT_FOUND');
+    }
+    if (row.deletedAt === null) {
+      // Nicht gelöscht — nichts zu restoren. Idempotent.
+      return;
+    }
+    if (row.deletionReason === null) {
+      // Self-Delete des Authors. Mod darf das nicht aufheben.
+      throw AppError.forbidden(
+        'Self-Deletes können nicht wiederhergestellt werden — Author-Intent.',
+        'CANNOT_RESTORE_SELF_DELETE'
+      );
     }
     await persistence.database.query(
       `UPDATE public."comment"
