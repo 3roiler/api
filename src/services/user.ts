@@ -407,6 +407,24 @@ export class UserService {
    * gerendert wird. KEIN Hard-Delete: bestehende Beiträge sind sonst
    * weg, das wäre Datenverlust für die Community.
    *
+   * Was passiert mit verknüpften Daten?
+   *  - `clip` (FK submitted_by_user_id, ON DELETE CASCADE auf user-row)
+   *    bleibt: die user-row wird ja nur soft-gelöscht. Der Clip-Submitter
+   *    rendert als „Gelöschter Nutzer".
+   *  - `clip_rating` (FK user_id, ON DELETE CASCADE) bleibt aus dem
+   *    gleichen Grund. Die Ratings tragen weiterhin zum globalen
+   *    Score-Mittelwert bei — sie enthalten keine PII (nur 1–5), und
+   *    sie aus dem Index zu reißen würde alte Leaderboards verfälschen.
+   *  - `comment` (FK user_id, ON DELETE RESTRICT) bleibt; gleicher
+   *    Grund. Author wird als „Gelöschter Nutzer" rendert.
+   *  - `clip_report.reporter_user_id` (FK ON DELETE CASCADE) bleibt;
+   *    Reports verlieren die Reporter-Identität, aber der Mod sieht
+   *    weiterhin Inhalt + Datum.
+   *  - `print_request.requester_user_id` bleibt analog.
+   *  - Explizit gelöscht werden: twitch_token, user_permission,
+   *    user_group, social_link, comment_mute — alles user-spezifisch
+   *    und ohne Wert nach der Anonymisierung.
+   *
    * Idempotent: zweites Aufrufen ist kein Fehler (deleted_at bleibt der
    * ursprüngliche Zeitpunkt, restliche Felder werden re-normalisiert).
    */
