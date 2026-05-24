@@ -122,6 +122,23 @@ export class CommentService {
       throw AppError.badRequest('Blog-Kommentare haben keinen Clip-Timestamp.', 'TIMESTAMP_NOT_ALLOWED');
     }
 
+    // Target-Existenz prüfen. Wir haben keine FK von comment.target_id
+    // auf eine konkrete Tabelle (polymorph), also könnte ein Client
+    // sonst Kommentare auf random UUIDs einfügen — Orphans, die in
+    // keinem Render-Pfad auftauchen, aber Storage fressen und ein
+    // einfacher Spam-Vektor wären. Blog-Targets werden bereits im
+    // Controller via slug → post.id aufgelöst (impliziter Check);
+    // Clip-Targets bekommen ihn hier.
+    if (input.targetType === 'clip') {
+      const clipExists = await persistence.database.query(
+        `SELECT 1 FROM public."clip" WHERE id = $1::uuid`,
+        [input.targetId]
+      );
+      if (clipExists.rowCount === 0) {
+        throw AppError.notFound('Clip nicht gefunden.', 'CLIP_NOT_FOUND');
+      }
+    }
+
     // Mute-Check.
     const mute = await this.getMuteFor(input.userId);
     if (mute !== null) {
