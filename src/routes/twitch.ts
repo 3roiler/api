@@ -3,10 +3,20 @@ import { config, user as userService } from '../services';
 import auth from '../services/auth.js';
 import AppError from '../services/error';
 import system from '../services/system.js';
+import { oauthStateHandler, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
 
 const router = Router();
 
 const TWITCH_API_BASE = 'https://api.twitch.tv/helix';
+const OAUTH_STATE_COOKIE = 'twitch_oauth_state';
+// Twitch login names: 4–25 chars, word characters only. We pre-validate
+// before hitting the upstream API both as a 400-fast-fail and to keep the
+// rate-limit budget clean.
+const TWITCH_CHANNEL_RE = /^\w{4,25}$/;
+// Muss bei Twitch in der App-Konsole als Callback hinterlegt sein.
+// Wir generieren den Wert serverseitig und ignorieren alles vom Client —
+// `req.headers.referer` war ein offener Open-Redirect-Vektor.
+const TWITCH_REDIRECT_URI = `${config.webUrl}/callback/twitch`;
 
 async function getTwitchUserInfo(accessToken: string, clientId: string) {
   const response = await fetch(`${TWITCH_API_BASE}/users`, {
@@ -24,21 +34,32 @@ async function getTwitchUserInfo(accessToken: string, clientId: string) {
   return data.data[0];
 }
 
+// GET /api/twitch/oauth-state — siehe `services/oauth-state.ts` für das
+// CSRF-Pattern. Auth bewusst optional (anonyme Nutzer:innen loggen sich
+// ein), Rate-Limit greift in `app.ts`.
+router.get('/oauth-state', oauthStateHandler(OAUTH_STATE_COOKIE));
+
 /**
  * POST /api/twitch/oauth
  * Exchange Twitch auth code for token, create/link user
  */
 router.post('/oauth', async (req, res, next) => {
-  const { code, redirect_uri } = req.body;
+  const { code, state } = req.body;
+
+  // Räumt das State-Cookie immer ab und prüft timing-safe gegen Body.
+  if (!verifyAndClearOAuthStateCookie(req, res, OAUTH_STATE_COOKIE, state)) {
+    return res.status(400).json({ error: 'Invalid OAuth state' });
+  }
 
   if (typeof code !== 'string') {
     return next(AppError.badRequest('Code is required and must be a string.'));
   }
 
-  const callbackUrl = redirect_uri || req.headers.referer || '';
   const { clientId, clientSecret } = config.providers.twitch;
 
-  const token = await auth.exchangeTwitch(code, clientId, clientSecret, callbackUrl);
+  // Feste, serverseitige Redirect-URI — entspricht dem in der Twitch-
+  // App-Konsole hinterlegten Callback. Niemals aus dem Request übernehmen.
+  const token = await auth.exchangeTwitch(code, clientId, clientSecret, TWITCH_REDIRECT_URI);
   const twitchUser = await getTwitchUserInfo(token.access_token, clientId);
   const email = twitchUser.email || null;
 
@@ -106,6 +127,13 @@ router.post('/oauth', async (req, res, next) => {
  */
 router.get('/stream/:channel', async (req, res, next) => {
   const { channel } = req.params;
+
+  // Twitch-Login-Format prüfen, bevor wir zur Twitch-API rausgehen — spart
+  // einen sicheren 400 + schont das Rate-Limit-Budget des App-Tokens.
+  if (!TWITCH_CHANNEL_RE.test(channel)) {
+    return next(AppError.badRequest('Invalid Twitch channel name.'));
+  }
+
   const { clientId, clientSecret } = config.providers.twitch;
 
   // Get app access token

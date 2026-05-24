@@ -10,8 +10,12 @@ const app: Application = express();
 
 app.set('trust proxy', 1);
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body-Limits: JSON-Endpoints transportieren nur kleine Payloads (Login,
+// Settings, Kommentare). 64 KiB ist großzügig genug und macht trivialen
+// Memory-Pressure-DoS unattraktiv. Große Uploads (G-Code, STL) gehen
+// über eigene `express.raw()`-Routen mit eigenen Limits.
+app.use(express.json({ limit: '64kb' }));
+app.use(express.urlencoded({ extended: true, limit: '32kb' }));
 // CORS mit Cookie-Auth (credentials) verträgt KEIN Wildcard '*' und kein
 // bedingungsloses Origin-Reflektieren (`origin: true`) — beides ist mit
 // credentials unsicher und wird von CodeQL (js/cors-permissive-configuration)
@@ -39,10 +43,51 @@ app.use(cors({
   }
 }));
 
-// CSRF: Origin-Validierung für mutierende, Cookie-authentifizierte Requests
-// (zweite Schicht neben dem SameSite-Cookie). Muss nach cookieParser/CORS
-// laufen, da es req.cookies und den Origin-Header auswertet.
-app.use(csrfGuard);
+/**
+ * Dedicated rate limits for credential/OAuth endpoints. These hang BEFORE
+ * the global limiter so the per-IP budget is enforced per scope (login
+ * spam should not also DoS the rest of the app, and a bot hammering
+ * `/twitch/stream/:channel` shouldn't burn the global bucket either).
+ *
+ * Window + max are deliberately tight — anything tighter and a noisy
+ * mobile NAT exit hurts real users; anything looser and credential
+ * stuffing becomes practical.
+ */
+const loginLimiter = limiter({ windowMs: 15 * 60 * 1000, max: 5, standardHeaders: true });
+const oauthLimiter = limiter({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true });
+const oauthStateLimiter = limiter({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
+const twitchStreamLimiter = limiter({ windowMs: 60 * 1000, max: 30, standardHeaders: true });
+
+/**
+ * Helper: nur dann anwenden, wenn `req.path` *exakt* einem dieser Pfade
+ * entspricht — `app.use(pfad, …)` matcht Präfixe, was hier ungewollt wäre
+ * (`/twitch/oauth` würde sonst auch `/twitch/oauth-state` schlucken).
+ */
+function exactPath(paths: string[], handler: express.RequestHandler): express.RequestHandler {
+  const set = new Set(paths);
+  return (req, res, next) => {
+    if (set.has(req.path)) return handler(req, res, next);
+    return next();
+  };
+}
+
+app.use(exactPath([`${config.prefix}/login`, `${config.prefix}/register`], loginLimiter));
+app.use(exactPath(
+  [`${config.prefix}/twitch/oauth-state`, `${config.prefix}/github/oauth-state`],
+  oauthStateLimiter
+));
+app.use(exactPath(
+  [`${config.prefix}/twitch/oauth`, `${config.prefix}/github/oauth`],
+  oauthLimiter
+));
+// Twitch-Stream-Endpoint hat einen Channel-Param im Pfad — daher hier
+// prefix-match per `startsWith`.
+app.use((req, res, next) => {
+  if (req.path.startsWith(`${config.prefix}/twitch/stream/`)) {
+    return twitchStreamLimiter(req, res, next);
+  }
+  return next();
+});
 
 /**
  * Global 100 req / 10 min per-IP limit. The metrics router owns its own,
@@ -56,6 +101,14 @@ app.use(limiter({
   max: 100,
   skip: (req) => req.path.startsWith(`${config.prefix}/admin/metrics/`)
 }));
+
+// CSRF: Double-Submit-Cookie-Validierung für mutierende, Cookie- oder
+// Bearer-authentifizierte Requests. Bewusst NACH den Rate-Limitern
+// platziert, damit ein Angreifer den Auth-Check nicht unlimitiert
+// triggern kann (CodeQL js/missing-rate-limiting). Setzt zusätzlich das
+// XSRF-TOKEN-Cookie für das SPA — nach cookieParser/CORS, vor den
+// eigentlichen Routen.
+app.use(csrfGuard);
 
 app.use(logger);
 app.use(config.prefix, routes);

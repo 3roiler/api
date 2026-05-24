@@ -11,6 +11,17 @@ const url = process.env.API_URL || `http://localhost:${port}`;
 // `localhost` in dev. Mirrors the inline derivation already used for the
 // `access_token` cookie so CSRF/auth cookies share the same scope.
 const cookieDomain = url.replace(/^https?:\/\//, '').split(':')[0];
+// Public-facing frontend origin (e.g. `https://broiler.dev`). Used to build
+// fixed OAuth `redirect_uri` values that match what's registered with
+// GitHub/Twitch — must NOT come from the request (Referer/redirect_uri were
+// open-redirect-able). Defaults to the first CORS-whitelist entry; in dev
+// without CORS_ORIGIN it falls back to the local Vite dev server.
+const webUrl = (process.env.WEB_URL
+  || (process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map(s => s.trim())
+    .find(s => s && s !== '*')
+  || 'http://localhost:5173').replace(/\/$/, '');
 const databaseUrl = process.env.DATABASE_URL || '';
 const redisUrl = process.env.REDIS_URL || '';
 const contact = process.env.CONTACT_EMAIL || '';
@@ -78,6 +89,7 @@ export const config = {
   port,
   prefix,
   url,
+  webUrl,
   cookieDomain,
   databaseUrl,
   redisUrl,

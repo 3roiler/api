@@ -1,9 +1,15 @@
 #!/bin/sh
 set -e
+umask 077
 
 if [ -n "${DATABASE_CA:-}" ]; then
     echo "[entrypoint] Decoding DATABASE_CA to .certs/ca.crt"
     printf '%s' "$DATABASE_CA" | base64 -d > .certs/ca.crt
+    # node-pg-migrate liest weder `ca` noch `reject-unauthorized` aus
+    # .pgmigraterc.json. Damit die CA bei reject-unauthorized=true im TLS-
+    # Trust-Store landet, exportieren wir sie via NODE_EXTRA_CA_CERTS — Node
+    # merged sie dann mit dem System-CA-Bundle für jeden TLS-Handshake.
+    export NODE_EXTRA_CA_CERTS="$(pwd)/.certs/ca.crt"
 fi
 
 # Run pending migrations before the app starts. node-pg-migrate reads

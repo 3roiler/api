@@ -5,6 +5,6 @@
   "log": true,
   "verbose": true,
   "migration-file-language": "js",
-  "reject-unauthorized": false,
+  "reject-unauthorized": true,
   "ssl": true
 }

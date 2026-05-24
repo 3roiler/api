@@ -2,8 +2,15 @@ import { Router } from 'express';
 import { config, user as userService, bootstrap } from '../services/index.js';
 import auth from '../services/auth.js';
 import AppError from '../services/error.js';
+import { oauthStateHandler, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
 
 const router = Router();
+
+const OAUTH_STATE_COOKIE = 'github_oauth_state';
+// Muss bei GitHub in den OAuth-App-Settings hinterlegt sein. Serverseitig
+// gesetzt, damit `req.headers.referer`/Client-Werte keinen offenen
+// Redirect-Vektor mehr eröffnen können.
+const GITHUB_REDIRECT_URI = `${config.webUrl}/callback/github`;
 
 async function getGithubUserInfo(accessToken: string) {
   const response = await fetch('https://api.github.com/user', {
@@ -81,15 +88,25 @@ function isGithubHostedAvatar(value: string): boolean {
   }
 }
 
+// GET /api/github/oauth-state — siehe `services/oauth-state.ts` für das
+// CSRF-Pattern. Rate-Limit greift in `app.ts`.
+router.get('/oauth-state', oauthStateHandler(OAUTH_STATE_COOKIE));
+
 router.post("/oauth", async (req, res, next) => {
   const { code, state } = req.body;
+
+  // Räumt das State-Cookie immer ab und prüft timing-safe gegen Body.
+  if (!verifyAndClearOAuthStateCookie(req, res, OAUTH_STATE_COOKIE, state)) {
+    return res.status(400).json({ error: 'Invalid OAuth state' });
+  }
 
   if (typeof code !== 'string' || typeof state !== 'string') {
     return next(AppError.badRequest('Code and state are required and must be strings.'));
   }
 
-  const redirectUri = req.headers.referer || '';
-  const token = await auth.exchangeGithub(code, state, config.providers.github.clientId, config.providers.github.clientSecret, redirectUri);
+  // Feste, serverseitige Redirect-URI — entspricht dem in der GitHub-
+  // OAuth-App hinterlegten Callback. Niemals aus dem Request übernehmen.
+  const token = await auth.exchangeGithub(code, state, config.providers.github.clientId, config.providers.github.clientSecret, GITHUB_REDIRECT_URI);
   const response = await getGithubUserInfo(token.access_token);
 
   const githubUser = response as {

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction, type RequestHandler } from 'express';
+import jose from 'jose';
 import AppError from './error.js';
 import persistence from './persistence.js';
 import config from './config.js';
@@ -11,6 +12,11 @@ declare global {
   namespace Express {
     interface Request {
       userId?: string | null;
+      // `'bearer'` wenn das JWT aus dem Authorization-Header kam,
+      // `'cookie'` wenn aus `cookies.access_token`. Wird vom CSRF-Guard
+      // ausgewertet, damit Bearer-Auth nicht stillschweigend am
+      // Double-Submit-Cookie vorbeiläuft.
+      authSource?: 'bearer' | 'cookie';
     }
   }
 }
@@ -91,9 +97,11 @@ const authHandler = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   let type;
   let token;
+  let source: 'bearer' | 'cookie' = 'cookie';
   if (authHeader) {
     type = authHeader?.split(' ')[0];
     token = authHeader?.split(' ')[1];
+    source = 'bearer';
   } else {
     type = 'Bearer';
     token = req.cookies['access_token']
@@ -102,6 +110,7 @@ const authHandler = async (req: Request, res: Response, next: NextFunction) => {
   if (type == 'Bearer' && token) {
     const accessToken = await verifyToken(token);
     req.userId = accessToken.payload.sub;
+    req.authSource = source;
     return next();
   }
 
@@ -118,9 +127,11 @@ const optionalAuthHandler = async (req: Request, _res: Response, next: NextFunct
   const authHeader = req.headers['authorization'];
   let type;
   let token;
+  let source: 'bearer' | 'cookie' = 'cookie';
   if (authHeader) {
     type = authHeader?.split(' ')[0];
     token = authHeader?.split(' ')[1];
+    source = 'bearer';
   } else {
     type = 'Bearer';
     token = req.cookies['access_token'];
@@ -130,6 +141,7 @@ const optionalAuthHandler = async (req: Request, _res: Response, next: NextFunct
     try {
       const accessToken = await verifyToken(token);
       req.userId = accessToken.payload.sub;
+      req.authSource = source;
     } catch {
       // Bad / expired / revoked token on a public endpoint: treat as anonymous.
     }
@@ -138,12 +150,45 @@ const optionalAuthHandler = async (req: Request, _res: Response, next: NextFunct
   return next();
 };
 
+const EMAIL_MAX = 320;
+const PASSWORD_MIN = 12;
+
+/**
+ * Lightweight email validator without regex backtracking. Mirrors
+ * `controllers/admin.ts#isValidEmail` — kept duplicated here to avoid an
+ * import from a controller into a service (would invert the layering).
+ */
+function isValidEmail(value: string): boolean {
+  if (value.length === 0 || value.length > EMAIL_MAX) return false;
+  if (/\s/.test(value)) return false;
+  const at = value.indexOf('@');
+  if (at < 1 || at !== value.lastIndexOf('@')) return false;
+  const domain = value.slice(at + 1);
+  const dot = domain.lastIndexOf('.');
+  return dot > 0 && dot < domain.length - 1;
+}
+
 const registerHandler = async (req: Request, res: Response, next: NextFunction) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password) {
     return next(AppError.badRequest('Name, email, and password are required'));
   }
 
+  if (typeof email !== 'string' || !isValidEmail(email)) {
+    return next(AppError.badRequest('Bitte eine gültige E-Mail-Adresse angeben.', 'BAD_EMAIL'));
+  }
+
+  if (typeof password !== 'string' || password.length < PASSWORD_MIN) {
+    return next(AppError.badRequest(
+      `Passwort muss mindestens ${PASSWORD_MIN} Zeichen lang sein.`,
+      'WEAK_PASSWORD'
+    ));
+  }
+
+  // Bewusste UX-Entscheidung: 409 bleibt — eine generische Fehlermeldung
+  // würde dem User die Diagnose erschweren („warum klappt das nicht?").
+  // User-Enumeration wird stattdessen durch den 5/15-min-Limiter auf
+  // `/register` (siehe app.ts) unpraktisch.
   if (await user.userExists(email)) {
     return next(AppError.conflict('User with this email already exists'));
   }
@@ -181,10 +226,15 @@ const loginHandler = async (req: Request, res: Response, next: NextFunction) => 
           }, config.jwtSecret);
           const u = await user.getUserById(result.id);
 
+          // `sameSite: 'lax'` (nicht `'strict'`), damit das Cookie auch nach
+          // einem externen Redirect (z.B. OAuth-Callback von Twitch/GitHub
+          // zurück auf broiler.dev) mitgeschickt wird. `strict` würde die
+          // Session in genau diesen Fluss-Übergängen tot machen. Konsistent
+          // mit `logoutHandler` und den OAuth-Handlern.
           return res.cookie('access_token', token, {
             httpOnly: true,
             secure: config.isProduction,
-            sameSite: 'strict',
+            sameSite: 'lax',
             domain: config.url.replace(/^https?:\/\//, '').split(':')[0],
             maxAge: config.jwtExpire,
             path: config.prefix
@@ -197,7 +247,41 @@ const loginHandler = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-const logoutHandler: RequestHandler = async (_, res) => {
+const logoutHandler: RequestHandler = async (req, res) => {
+  // JWT zur Revocation entschlüsseln — bewusst NICHT verifizieren: ein
+  // abgelaufenes Token soll trotzdem revoked werden können, falls der Client
+  // es noch herumträgt. Wir interessieren uns nur für `jti` und `exp`.
+  // Token wird wie in `authHandler` aus Cookie oder Bearer-Header gelesen.
+  const authHeader = req.headers['authorization'];
+  let token: string | undefined;
+  if (authHeader) {
+    const [type, value] = authHeader.split(' ');
+    if (type === 'Bearer' && value) token = value;
+  } else {
+    token = req.cookies?.['access_token'];
+  }
+
+  if (token) {
+    try {
+      const payload = jose.decodeJwt(token);
+      const jti = payload.jti;
+      const exp = payload.exp; // Sekunden seit Epoch
+      if (typeof jti === 'string' && typeof exp === 'number') {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const ttlSec = exp - nowSec;
+        if (ttlSec > 0) {
+          // Revocation-Eintrag lebt nur so lange wie das Token selbst —
+          // danach würde es ohnehin in `verifyToken` als expired abgewiesen.
+          await persistence.cache.set(`revoked_token:${jti}`, '1', { EX: ttlSec });
+        }
+      }
+    } catch (err) {
+      // Defektes/fremdes Token: Logout darf nicht aufgrund eines kaputten
+      // Cookies fehlschlagen — Cookie unten trotzdem clearen.
+      console.warn('[logout] could not decode token for revocation:', err);
+    }
+  }
+
   return res.status(200).clearCookie('access_token', {
     httpOnly: true,
     secure: config.isProduction,

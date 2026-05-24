@@ -2,7 +2,11 @@ node_modules
 npm-debug.log
 Dockerfile*
 .env
-dist/*.map
+dist
 *.md
 **/README.md
 .eslintrc.js
+.git
+.github
+.devcontainer
+.vscode
