@@ -211,7 +211,7 @@ const restore = async (req: Request, res: Response, next: NextFunction) => {
       return next(AppError.forbidden('Nur Moderatoren.', 'NOT_MODERATOR'));
     }
     const commentId = assertUuid(req.params.id, 'id');
-    await commentService.restore(commentId);
+    await commentService.restore(commentId, userId);
     return res.status(204).send();
   } catch (err) {
     return next(err);

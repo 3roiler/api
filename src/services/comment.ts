@@ -282,8 +282,13 @@ export class CommentService {
     );
   }
 
-  /** Wiederherstellen — nur durch Mods. Setzt soft-delete-Felder zurück. */
-  async restore(commentId: string): Promise<void> {
+  /**
+   * Wiederherstellen — nur durch Mods. Archiviert den letzten
+   * Lösch-Grund in `last_deletion_reason` und stempelt
+   * `restored_at` + `restored_by_user_id`, damit die Mod-Aktion
+   * nachvollziehbar bleibt (vorher ging der Audit komplett verloren).
+   */
+  async restore(commentId: string, moderatorId: string): Promise<void> {
     const exists = await persistence.database.query(
       `SELECT 1 FROM public."comment" WHERE id = $1::uuid`,
       [commentId]
@@ -295,10 +300,13 @@ export class CommentService {
       `UPDATE public."comment"
        SET deleted_at = NULL,
            deleted_by_user_id = NULL,
+           last_deletion_reason = deletion_reason,
            deletion_reason = NULL,
+           restored_at = NOW(),
+           restored_by_user_id = $2::uuid,
            updated_at = NOW()
        WHERE id = $1::uuid`,
-      [commentId]
+      [commentId, moderatorId]
     );
   }
 
