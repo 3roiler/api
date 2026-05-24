@@ -307,6 +307,15 @@ export class CommentService {
     if (trimmed.length > 500) {
       throw AppError.badRequest('Begründung zu lang (max. 500 Zeichen).', 'REASON_TOO_LONG');
     }
+    // Existenz-Check VOR INSERT — sonst kracht der FK-Constraint mit
+    // einem 500. Ein 404 ist hier die ehrlichere Antwort an den Mod.
+    const userExists = await persistence.database.query(
+      `SELECT 1 FROM public."user" WHERE id = $1::uuid`,
+      [input.userId]
+    );
+    if (userExists.rowCount === 0) {
+      throw AppError.notFound('User nicht gefunden.', 'USER_NOT_FOUND');
+    }
     const res = await persistence.database.query<CommentMute>(
       `INSERT INTO public."comment_mute" (user_id, reason, muted_by_user_id, muted_until)
        VALUES ($1::uuid, $2, $3::uuid, $4)
