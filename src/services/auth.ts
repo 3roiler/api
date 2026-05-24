@@ -75,6 +75,33 @@ class Auth {
         return data;
     }
 
+    /**
+     * Widerruft ein Twitch-OAuth-Token serverseitig bei Twitch. Wird beim
+     * Self-Anonymize (`/user/nuke`) aufgerufen, damit der Token bei Twitch
+     * sofort ungültig ist und nicht bis zum natürlichen Ablauf weiterläuft.
+     *
+     * Twitch dokumentiert: 200 bei erfolgreichem Revoke, 400 wenn Token
+     * unbekannt/abgelaufen. Wir akzeptieren beides als „okay" — der Effekt
+     * (Token kann nicht mehr genutzt werden) ist gleich. Andere Fehler
+     * werfen wir; der Caller behandelt das als best-effort.
+     */
+    async revokeTwitch(token: string, clientId: string): Promise<void> {
+        const response = await fetch('https://id.twitch.tv/oauth2/revoke', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+                client_id: clientId,
+                token
+            })
+        });
+
+        if (response.status !== 200 && response.status !== 400) {
+            throw new Error(`Twitch token revocation failed with status ${response.status}`);
+        }
+    }
+
     async refreshTwitchToken(refreshToken: string, clientId: string, clientSecret: string): Promise<TwitchOAuthToken> {
         const response = await fetch('https://id.twitch.tv/oauth2/token', {
             method: 'POST',

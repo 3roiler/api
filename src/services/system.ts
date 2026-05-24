@@ -247,11 +247,17 @@ const loginHandler = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-const logoutHandler: RequestHandler = async (req, res) => {
-  // JWT zur Revocation entschlüsseln — bewusst NICHT verifizieren: ein
-  // abgelaufenes Token soll trotzdem revoked werden können, falls der Client
-  // es noch herumträgt. Wir interessieren uns nur für `jti` und `exp`.
-  // Token wird wie in `authHandler` aus Cookie oder Bearer-Header gelesen.
+/**
+ * JWT aus Cookie ODER Bearer-Header lesen und den `jti` in den
+ * Revocation-Cache schreiben (TTL = Token-Restlaufzeit). Bewusst KEINE
+ * Verifikation — ein abgelaufenes oder gestohlenes Token soll trotzdem
+ * revoked werden können. Best-effort: Defekte Tokens werden geloggt, nicht
+ * geworfen, damit Logout/Nuke nicht an einem kaputten Cookie scheitern.
+ *
+ * Genutzt von `logoutHandler` (Standard-Logout) und `userController.nukeMePlease`
+ * (Self-Anonymize via DSGVO).
+ */
+async function revokeCurrentToken(req: Request, contextLabel: string): Promise<void> {
   const authHeader = req.headers['authorization'];
   let token: string | undefined;
   if (authHeader) {
@@ -261,26 +267,28 @@ const logoutHandler: RequestHandler = async (req, res) => {
     token = req.cookies?.['access_token'];
   }
 
-  if (token) {
-    try {
-      const payload = jose.decodeJwt(token);
-      const jti = payload.jti;
-      const exp = payload.exp; // Sekunden seit Epoch
-      if (typeof jti === 'string' && typeof exp === 'number') {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const ttlSec = exp - nowSec;
-        if (ttlSec > 0) {
-          // Revocation-Eintrag lebt nur so lange wie das Token selbst —
-          // danach würde es ohnehin in `verifyToken` als expired abgewiesen.
-          await persistence.cache.set(`revoked_token:${jti}`, '1', { EX: ttlSec });
-        }
+  if (!token) return;
+
+  try {
+    const payload = jose.decodeJwt(token);
+    const jti = payload.jti;
+    const exp = payload.exp; // Sekunden seit Epoch
+    if (typeof jti === 'string' && typeof exp === 'number') {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const ttlSec = exp - nowSec;
+      if (ttlSec > 0) {
+        // Revocation-Eintrag lebt nur so lange wie das Token selbst —
+        // danach würde es ohnehin in `verifyToken` als expired abgewiesen.
+        await persistence.cache.set(`revoked_token:${jti}`, '1', { EX: ttlSec });
       }
-    } catch (err) {
-      // Defektes/fremdes Token: Logout darf nicht aufgrund eines kaputten
-      // Cookies fehlschlagen — Cookie unten trotzdem clearen.
-      console.warn('[logout] could not decode token for revocation:', err);
     }
+  } catch (err) {
+    console.warn(`[${contextLabel}] could not decode token for revocation:`, err);
   }
+}
+
+const logoutHandler: RequestHandler = async (req, res) => {
+  await revokeCurrentToken(req, 'logout');
 
   return res.status(200).clearCookie('access_token', {
     httpOnly: true,
@@ -354,5 +362,6 @@ export default {
   registerHandler,
   loginHandler,
   logoutHandler,
+  revokeCurrentToken,
   getHealthState
 };

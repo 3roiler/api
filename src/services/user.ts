@@ -2,6 +2,8 @@ import type { QueryResult } from 'pg';
 import persistence from './persistence';
 import type { User, SocialLink } from '../models/index.js';
 import { UUID } from 'node:crypto';
+import auth from './auth.js';
+import config from './config.js';
 
 const USER_COLUMNS = `
   id,
@@ -421,15 +423,33 @@ export class UserService {
    *    Reports verlieren die Reporter-Identität, aber der Mod sieht
    *    weiterhin Inhalt + Datum.
    *  - `print_request.requester_user_id` bleibt analog.
-   *  - Explizit gelöscht werden: twitch_token, user_permission,
-   *    user_group, social_link, comment_mute — alles user-spezifisch
-   *    und ohne Wert nach der Anonymisierung.
+   *  - Explizit gelöscht werden: twitch_token, refresh_token,
+   *    user_permission, user_group, user_social_link, comment_mute —
+   *    alles user-spezifisch und ohne Wert nach der Anonymisierung.
+   *  - Twitch-OAuth-Token wird VOR dem DB-Delete bei Twitch revoked
+   *    (best-effort: scheitert die Revoke, geht die Anonymisierung
+   *    trotzdem durch — wir wollen das DSGVO-Löschen nicht an einem
+   *    Drittanbieter-Ausfall blockieren).
    *
    * Idempotent: zweites Aufrufen ist kein Fehler (deleted_at bleibt der
    * ursprüngliche Zeitpunkt, restliche Felder werden re-normalisiert).
    */
   async anonymizeUser(id: string): Promise<boolean> {
-    // Alles in EINER Transaction — sechs separate Statements ohne
+    // Twitch-Token VOR der Transaktion holen + bei Twitch revoken. Das
+    // ist ein externer HTTP-Call, gehört nicht in eine offene DB-Transaktion.
+    // Best-effort: wenn Twitch hängt oder das Token schon abgelaufen ist
+    // (400 ist von revokeTwitch akzeptiert), loggen wir nur und löschen
+    // den DB-Eintrag trotzdem.
+    const twitchToken = await this.getTwitchToken(id).catch(() => null);
+    if (twitchToken) {
+      try {
+        await auth.revokeTwitch(twitchToken.accessToken, config.providers.twitch.clientId);
+      } catch (err) {
+        console.warn(`[anonymizeUser] Twitch token revoke failed for user ${id}:`, err);
+      }
+    }
+
+    // Alles in EINER Transaction — sieben separate Statements ohne
     // Atomicity wäre fatal: ein Netzwerk-Hiccup mittendrin könnte z. B.
     // Permissions löschen, aber das PII-Wipe nicht durchlaufen lassen.
     // Der User wäre dann zwar rechtelos, aber sein Klarname stünde
@@ -440,11 +460,15 @@ export class UserService {
 
       // Twitch-OAuth-Token: kein Refresh-Bypass nach Anonymisierung.
       await client.query(`DELETE FROM public."twitch_token" WHERE user_id = $1`, [id]);
+      // Refresh-Tokens enthalten IP-Adresse + User-Agent + Metadata —
+      // PII, die ohne aktive Session keinen Wert mehr hat. CASCADE auf
+      // user-row greift nicht, da die user-row nur soft-gelöscht wird.
+      await client.query(`DELETE FROM public."refresh_token" WHERE user_id = $1`, [id]);
       // Permissions weg — re-login darf alte Rechte nicht wiederholen.
       await client.query(`DELETE FROM public."user_permission" WHERE user_id = $1`, [id]);
       await client.query(`DELETE FROM public."user_group" WHERE user_id = $1`, [id]);
       // Profil-Decorations weg.
-      await client.query(`DELETE FROM public."social_link" WHERE user_id = $1`, [id]);
+      await client.query(`DELETE FROM public."user_social_link" WHERE user_id = $1`, [id]);
       await client.query(`DELETE FROM public."comment_mute" WHERE user_id = $1`, [id]);
 
       const result = await client.query(
@@ -477,6 +501,142 @@ export class UserService {
   async deleteUser(id: string): Promise<boolean> {
     const result = await persistence.database.query('DELETE FROM public."user" WHERE id = $1', [id]);
     return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Sammelt alle personenbezogenen Daten des Users in ein einziges JSON-
+   * Objekt — Datenauskunft nach DSGVO Art. 15 + Portabilität nach Art. 20.
+   *
+   * Bewusst NICHT enthalten:
+   *  - `user_login.password` (Bcrypt-Hash; PII für den User selbst irrelevant
+   *    und nach Export-Leak ein Bruteforce-Vektor).
+   *  - `twitch_token.access_token` / `refresh_token` (Live-Credentials —
+   *    wenn der Export-Endpoint je leaked, hätte der Angreifer den
+   *    Twitch-Account ohne Re-Login).
+   *  - `refresh_token.hash` (gleiche Begründung).
+   *  - Inhalte gehosteter Dateien (STL/G-Code-Binärdaten) — Original-Files
+   *    bekommt der User über die Download-Endpunkte; das Export-JSON hält
+   *    nur Metadaten.
+   *
+   * Die Queries laufen parallel, damit ein Export bei aktiven Nutzer:innen
+   * nicht zur tail-of-tail wird. Sequenziell summiert wären das ~17 Round-
+   * Trips — Promise.all bringt es auf eine Connection-Pool-Latenz.
+   */
+  async exportUserData(userId: string): Promise<Record<string, unknown>> {
+    const db = persistence.database;
+    const id = [userId];
+
+    const [
+      profileRes,
+      loginRes,
+      twitchRes,
+      socialLinksRes,
+      permissionsRes,
+      groupsRes,
+      refreshTokensRes,
+      commentsRes,
+      muteRes,
+      mutesIssuedRes,
+      commentsDeletedRes,
+      submittedClipsRes,
+      clipRatingsRes,
+      clipReportsRes,
+      blogPostsRes,
+      stlFilesRes,
+      gcodeFilesRes,
+      printRequestsRes,
+      printRequestCommentsRes,
+      printJobsRes,
+      printerAccessRes,
+    ] = await Promise.all([
+      db.query(`SELECT id, github_id, twitch_id, name, display_name, email, avatar_url,
+                       deleted_at, created_at, updated_at
+                FROM public."user" WHERE id = $1`, id),
+      db.query(`SELECT username, created_at, updated_at
+                FROM public."user_login" WHERE user_id = $1`, id),
+      db.query(`SELECT twitch_user_id, twitch_login, scopes, expires_at, created_at, updated_at
+                FROM public."twitch_token" WHERE user_id = $1`, id),
+      db.query(`SELECT id, label, url, sort_order, created_at, updated_at
+                FROM public."user_social_link" WHERE user_id = $1 ORDER BY sort_order`, id),
+      db.query(`SELECT permission, granted_at
+                FROM public."user_permission" WHERE user_id = $1`, id),
+      db.query(`SELECT g.name, g.description, ug.created_at
+                FROM public."user_group" ug
+                JOIN public."group" g ON g.id = ug.group_id
+                WHERE ug.user_id = $1`, id),
+      db.query(`SELECT id, provider, expires_at, created_at, revoked_at, agent, ip_address, metadata
+                FROM public."refresh_token" WHERE user_id = $1`, id),
+      db.query(`SELECT id, parent_comment_id, target_type, target_id, body, timestamp_seconds,
+                       deleted_at, deletion_reason, created_at, updated_at
+                FROM public."comment" WHERE user_id = $1`, id),
+      db.query(`SELECT muted_until, reason, muted_by_user_id, created_at
+                FROM public."comment_mute" WHERE user_id = $1`, id),
+      db.query(`SELECT user_id, muted_until, reason, created_at
+                FROM public."comment_mute" WHERE muted_by_user_id = $1`, id),
+      db.query(`SELECT id, target_type, target_id, deleted_at, deletion_reason, user_id AS author_user_id
+                FROM public."comment" WHERE deleted_by_user_id = $1 AND user_id <> $1`, id),
+      db.query(`SELECT * FROM public."clip" WHERE submitted_by_user_id = $1`, id),
+      db.query(`SELECT clip_id, score, is_skipped, created_at, updated_at
+                FROM public."clip_rating" WHERE user_id = $1`, id),
+      db.query(`SELECT id, clip_id, reason, status, resolved_at, created_at
+                FROM public."clip_report" WHERE reporter_user_id = $1`, id),
+      db.query(`SELECT id, slug, title, excerpt, content, published_at, created_at, updated_at
+                FROM public."blog_post" WHERE author_id = $1`, id),
+      db.query(`SELECT id, original_filename, metadata, created_at
+                FROM public."stl_file" WHERE uploaded_by_user_id = $1`, id),
+      db.query(`SELECT id, original_filename, metadata, created_at
+                FROM public."gcode_file" WHERE uploaded_by_user_id = $1`, id),
+      db.query(`SELECT * FROM public."print_request" WHERE requester_user_id = $1`, id),
+      db.query(`SELECT id, print_request_id, body, created_at, updated_at
+                FROM public."print_request_comment" WHERE author_user_id = $1`, id),
+      db.query(`SELECT * FROM public."print_job" WHERE user_id = $1`, id),
+      db.query(`SELECT printer_id, role, can_view_camera, granted_at
+                FROM public."printer_access" WHERE user_id = $1`, id),
+    ]);
+
+    return {
+      exportedAt: new Date().toISOString(),
+      exportFormatVersion: 1,
+      notice:
+        'Datenauskunft nach DSGVO Art. 15 + 20. Enthält alle personenbezogenen ' +
+        'Daten, die wir zu deinem Konto gespeichert haben. Nicht enthalten sind ' +
+        'Live-Credentials (Twitch-Access-Token, Login-Passwort-Hash) und binäre ' +
+        'Dateiinhalte — letztere bekommst du über die Download-Endpunkte.',
+      userId,
+      profile: profileRes.rows[0] ?? null,
+      accounts: {
+        login: loginRes.rows[0] ?? null,
+        twitch: twitchRes.rows[0] ?? null,
+      },
+      socialLinks: socialLinksRes.rows,
+      permissions: permissionsRes.rows,
+      groups: groupsRes.rows,
+      sessions: {
+        refreshTokens: refreshTokensRes.rows,
+      },
+      activity: {
+        submittedClips: submittedClipsRes.rows,
+        clipRatings: clipRatingsRes.rows,
+        clipReports: clipReportsRes.rows,
+        comments: commentsRes.rows,
+        blogPosts: blogPostsRes.rows,
+        printRequests: printRequestsRes.rows,
+        printRequestComments: printRequestCommentsRes.rows,
+        stlFiles: stlFilesRes.rows,
+        gcodeFiles: gcodeFilesRes.rows,
+        printJobs: printJobsRes.rows,
+      },
+      moderationState: {
+        currentMute: muteRes.rows[0] ?? null,
+      },
+      moderationActions: {
+        mutesIssued: mutesIssuedRes.rows,
+        commentsDeleted: commentsDeletedRes.rows,
+      },
+      accessGrants: {
+        printerAccess: printerAccessRes.rows,
+      },
+    };
   }
 
   /**
