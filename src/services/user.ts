@@ -429,51 +429,47 @@ export class UserService {
    * ursprüngliche Zeitpunkt, restliche Felder werden re-normalisiert).
    */
   async anonymizeUser(id: string): Promise<boolean> {
-    // Twitch-OAuth-Token zuerst killen, damit der User keine neue
-    // Session über Refresh ziehen kann. Cascade FK würde das auch
-    // beim Hard-Delete tun, beim Soft-Delete macht das aber niemand
-    // für uns.
-    await persistence.database.query(
-      `DELETE FROM public."twitch_token" WHERE user_id = $1`,
-      [id]
-    );
-    // User-Permissions kommen mit raus — ein gelöschter User soll
-    // beim eventuellen Re-Login nicht plötzlich seine alten Rechte
-    // wieder haben (Spam/Mod-Bypass-Vektor).
-    await persistence.database.query(
-      `DELETE FROM public."user_permission" WHERE user_id = $1`,
-      [id]
-    );
-    await persistence.database.query(
-      `DELETE FROM public."user_group" WHERE user_id = $1`,
-      [id]
-    );
-    // Social-Links und Mute-Einträge auch — gehören zum gelöschten
-    // Profil und haben in der Public-Darstellung nichts mehr verloren.
-    await persistence.database.query(
-      `DELETE FROM public."social_link" WHERE user_id = $1`,
-      [id]
-    );
-    await persistence.database.query(
-      `DELETE FROM public."comment_mute" WHERE user_id = $1`,
-      [id]
-    );
+    // Alles in EINER Transaction — sechs separate Statements ohne
+    // Atomicity wäre fatal: ein Netzwerk-Hiccup mittendrin könnte z. B.
+    // Permissions löschen, aber das PII-Wipe nicht durchlaufen lassen.
+    // Der User wäre dann zwar rechtelos, aber sein Klarname stünde
+    // noch in der Datenbank. ROLLBACK auf jeden Fehler.
+    const client = await persistence.database.connect();
+    try {
+      await client.query('BEGIN');
 
-    const result = await persistence.database.query(
-      `UPDATE public."user"
-       SET
-         name = $2,
-         display_name = $2,
-         email = NULL,
-         github_id = NULL,
-         twitch_id = NULL,
-         avatar_url = NULL,
-         deleted_at = COALESCE(deleted_at, NOW()),
-         updated_at = NOW()
-       WHERE id = $1`,
-      [id, ANONYMIZED_NAME]
-    );
-    return (result.rowCount ?? 0) > 0;
+      // Twitch-OAuth-Token: kein Refresh-Bypass nach Anonymisierung.
+      await client.query(`DELETE FROM public."twitch_token" WHERE user_id = $1`, [id]);
+      // Permissions weg — re-login darf alte Rechte nicht wiederholen.
+      await client.query(`DELETE FROM public."user_permission" WHERE user_id = $1`, [id]);
+      await client.query(`DELETE FROM public."user_group" WHERE user_id = $1`, [id]);
+      // Profil-Decorations weg.
+      await client.query(`DELETE FROM public."social_link" WHERE user_id = $1`, [id]);
+      await client.query(`DELETE FROM public."comment_mute" WHERE user_id = $1`, [id]);
+
+      const result = await client.query(
+        `UPDATE public."user"
+         SET
+           name = $2,
+           display_name = $2,
+           email = NULL,
+           github_id = NULL,
+           twitch_id = NULL,
+           avatar_url = NULL,
+           deleted_at = COALESCE(deleted_at, NOW()),
+           updated_at = NOW()
+         WHERE id = $1`,
+        [id, ANONYMIZED_NAME]
+      );
+
+      await client.query('COMMIT');
+      return (result.rowCount ?? 0) > 0;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /** Behalten für Migrations- und Test-Zwecke. Produktion nutzt
