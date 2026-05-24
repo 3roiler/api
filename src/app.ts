@@ -57,6 +57,10 @@ const loginLimiter = limiter({ windowMs: 15 * 60 * 1000, max: 5, standardHeaders
 const oauthLimiter = limiter({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true });
 const oauthStateLimiter = limiter({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true });
 const twitchStreamLimiter = limiter({ windowMs: 60 * 1000, max: 30, standardHeaders: true });
+// DSGVO-Export macht ~20 parallele DB-Queries — teurer Endpunkt, sollte
+// nicht zum Hammer-Tool werden. 5/Stunde reicht für legitime Auskunfts-
+// anfragen (Re-Export, Korrektur, Vergleich mit Backup).
+const exportLimiter = limiter({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true });
 
 /**
  * Helper: nur dann anwenden, wenn `req.path` *exakt* einem dieser Pfade
@@ -72,6 +76,7 @@ function exactPath(paths: string[], handler: express.RequestHandler): express.Re
 }
 
 app.use(exactPath([`${config.prefix}/login`, `${config.prefix}/register`], loginLimiter));
+app.use(exactPath([`${config.prefix}/user/me/export`], exportLimiter));
 app.use(exactPath(
   [`${config.prefix}/twitch/oauth-state`, `${config.prefix}/github/oauth-state`],
   oauthStateLimiter

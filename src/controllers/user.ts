@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { user, error } from '../services';
+import { user, error, system } from '../services';
 import type { SocialLinkInput } from '../services/user.js';
 
 const DISPLAY_NAME_MAX = 100;
@@ -214,21 +214,46 @@ const deleteUser = async (req: Request<{ id: string }>, res: Response, next: Nex
   return res.status(204).send();
 };
 
+/**
+ * GET /user/me/export — DSGVO Art. 15/20: strukturierter Daten-Export
+ * aller personenbezogenen Daten des eingeloggten Users. Antwort kommt mit
+ * `Content-Disposition: attachment`, damit Browser direkt ein Download-
+ * Dialog statt einer rohen JSON-Anzeige bringen. Rate-Limit greift
+ * zentral in `app.ts`.
+ */
+const exportMyData = async (req: Request, res: Response, next: NextFunction) => {
+  if (!req.userId) {
+    return next(error.unauthorized('No authenticated user.'));
+  }
+
+  const data = await user.exportUserData(req.userId);
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="broiler-data-export-${ts}.json"`);
+  // Pretty-print: Export ist eher Lese- als Massengut, lesbar gewinnt
+  // gegenüber kompakt.
+  return res.status(200).send(JSON.stringify(data, null, 2));
+};
+
 const nukeMePlease = async (req: Request, res: Response, next: NextFunction) => {
   if (!req.userId) {
     return next(error.unauthorized('No authenticated user.'));
   }
 
   console.info(`User ${req.userId} requested self-anonymisation`);
+
+  // JWT zuerst in den Revocation-Cache schreiben — sonst könnte der
+  // anonymisierte User mit dem alten Token noch bis zur natürlichen
+  // Token-Expiry (24 h) eingeloggt bleiben.
+  await system.revokeCurrentToken(req, 'nuke');
+
   // Soft-Delete + PII-Wipe statt Hard-Delete. Hängende Clips,
   // Kommentare und Reports bleiben bestehen und werden als
-  // „Gelöschter Nutzer" angezeigt.
+  // „Gelöschter Nutzer" angezeigt. Twitch-Token wird intern bei
+  // Twitch revoked (best-effort) und aus der DB gelöscht.
   await user.anonymizeUser(req.userId);
 
-  // Cookie sofort räumen, damit der nächste Request unauthenticated
-  // ist und das Frontend in den Logout-Zustand fällt. JWT bleibt
-  // technisch noch ~15 min gültig, aber ohne Cookie zieht der Client
-  // ihn nicht mehr.
+  // Cookie räumen — der Client soll sofort als unauthenticated fallen.
   res.clearCookie('access_token', { path: '/' });
   return res.status(204).send();
 };
@@ -242,5 +267,6 @@ export default {
   createUser,
   updateUser,
   deleteUser,
-  nukeMePlease
+  nukeMePlease,
+  exportMyData
 };

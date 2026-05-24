@@ -13,6 +13,7 @@ const router = Router();
 router.get('/search', userController.searchUsers);
 router.get('/me', userController.getMe);
 router.put('/me', userController.updateMe);
+router.get('/me/export', userController.exportMyData);
 router.post('/nuke', userController.nukeMePlease);
 
 // Admin-only: User-Liste mit E-Mails, Anlegen/Bearbeiten/Löschen fremder
