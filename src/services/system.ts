@@ -66,6 +66,27 @@ async function verifyToken(token: string) {
 }
 
 
+/**
+ * Auth-Middleware: prüft Cookie/Bearer-Token, setzt `req.userId`.
+ *
+ * Bewusst KEIN DB-Lookup auf `user.deleted_at` pro Request — JWT
+ * bleibt stateless. Wenn ein User sich anonymisiert (siehe
+ * `userService.anonymizeUser`), wird das Cookie geclearet und die
+ * Twitch-OAuth-Token gelöscht; ein bereits ausgestelltes JWT bleibt
+ * technisch ~15 min gültig.
+ *
+ * Akzeptiertes Risiko: ein anonymisierter User könnte ein lokal
+ * gespeichertes Cookie wieder in eine Anfrage einsetzen oder gerade
+ * laufende Requests könnten noch durchgehen. Blast-Radius = JWT-TTL.
+ * Für eine kleine Community-Site ohne Hochsicherheits-Anforderungen
+ * ist das tragbar; bei Bedarf wäre ein per-Request-DB-Check oder eine
+ * Token-Revocation-Liste (Redis-cached) der nächste Schritt.
+ *
+ * `getMe` macht für die User-Sicht den DB-Lookup explizit und gibt
+ * 401 + Cookie-Clear zurück, sobald deleted_at gesetzt ist — also auf
+ * dem ersten Frontend-Roundtrip nach der Anonymisierung ist der
+ * User out.
+ */
 const authHandler = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   let type;
