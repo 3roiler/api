@@ -219,7 +219,8 @@ export class CommentService {
       `UPDATE public."comment"
        SET deleted_at = COALESCE(deleted_at, NOW()),
            deleted_by_user_id = $2::uuid,
-           deletion_reason = NULL
+           deletion_reason = NULL,
+           updated_at = NOW()
        WHERE id = $1::uuid`,
       [commentId, userId]
     );
@@ -249,7 +250,8 @@ export class CommentService {
       `UPDATE public."comment"
        SET deleted_at = NOW(),
            deleted_by_user_id = $2::uuid,
-           deletion_reason = $3
+           deletion_reason = $3,
+           updated_at = NOW()
        WHERE id = $1::uuid`,
       [commentId, moderatorId, trimmed]
     );
