@@ -68,13 +68,15 @@ const createClipComment = async (req: Request, res: Response, next: NextFunction
       parentCommentId = body.parentCommentId;
     }
 
+    const bypassCooldown = await isModerator(userId);
     const comment = await commentService.create({
       targetType: 'clip',
       targetId: clipId,
       userId,
       body: body.body,
       timestampSeconds,
-      parentCommentId
+      parentCommentId,
+      bypassCooldown
     });
     return res.status(201).json(comment);
   } catch (err) {
@@ -131,13 +133,15 @@ const createBlogComment = async (req: Request, res: Response, next: NextFunction
       parentCommentId = body.parentCommentId;
     }
 
+    const bypassCooldown = await isModerator(userId);
     const comment = await commentService.create({
       targetType: 'blog_post',
       targetId: post.id,
       userId,
       body: body.body,
       timestampSeconds: null,
-      parentCommentId
+      parentCommentId,
+      bypassCooldown
     });
     return res.status(201).json(comment);
   } catch (err) {
