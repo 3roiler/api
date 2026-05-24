@@ -1,4 +1,4 @@
-import type { QueryResult } from 'pg';
+import type { PoolClient, QueryResult } from 'pg';
 import persistence from './persistence.js';
 import AppError from './error.js';
 import type {
@@ -177,18 +177,31 @@ export class CommentService {
       }
     }
 
-    // 30 s Cooldown — gleicher User auf gleichen Parent/Target. Mods
-    // können das per `bypassCooldown` überspringen (für Mod-Antworten
-    // in laufenden Threads). Wir bauen die Param-Liste passend zum
-    // SQL: 3 Werte bei Top-Level Posts, 4 Werte bei Replies.
-    if (input.bypassCooldown !== true) {
+    // Cooldown-Check + Insert müssen atomar laufen. Sonst kann ein
+    // schneller Doppel-Click oder ein paralleler Mehrfach-Request beide
+    // den Check passieren und doppelt einfügen. Wir holen uns einen
+    // pg-advisory-xact-Lock auf (user_id, target_id) — concurrent
+    // calls vom selben User auf das gleiche Target serialisieren sich
+    // damit, alles andere läuft frei weiter.
+    if (input.bypassCooldown === true) {
+      // Mod-Pfad ohne Cooldown — keine Race-Sorge weil Mod-Reaktionen
+      // typischerweise nicht parallel-spammed werden.
+      return this.insertCommentRow(persistence.database, input, trimmed);
+    }
+
+    return this.withTx(async (client) => {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))`,
+        [input.userId, input.targetId]
+      );
+
       const cooldownParams: unknown[] = [input.targetType, input.targetId, input.userId];
       let cooldownParentClause = 'parent_comment_id IS NULL';
       if (input.parentCommentId !== null) {
         cooldownParams.push(input.parentCommentId);
         cooldownParentClause = `parent_comment_id = $${cooldownParams.length}::uuid`;
       }
-      const recentRes: QueryResult<{ count: string }> = await persistence.database.query(
+      const recentRes: QueryResult<{ count: string }> = await client.query(
         `SELECT COUNT(*)::text AS count FROM public."comment"
          WHERE target_type = $1
            AND target_id = $2::uuid
@@ -204,9 +217,23 @@ export class CommentService {
           'COMMENT_COOLDOWN'
         );
       }
-    }
+      return this.insertCommentRow(client, input, trimmed);
+    });
+  }
 
-    const result: QueryResult<Comment> = await persistence.database.query(
+  /** Interner Insert — von beiden Pfaden (mit/ohne Cooldown) genutzt. */
+  private async insertCommentRow(
+    runner: { query: PoolClient['query'] | typeof persistence.database.query },
+    input: {
+      targetType: CommentTargetType;
+      targetId: string;
+      userId: string;
+      timestampSeconds: number | null;
+      parentCommentId: string | null;
+    },
+    trimmedBody: string
+  ): Promise<Comment> {
+    const result = (await (runner.query as PoolClient['query'])(
       `INSERT INTO public."comment"
          (parent_comment_id, target_type, target_id, user_id, body, timestamp_seconds)
        VALUES ($1, $2, $3::uuid, $4::uuid, $5, $6)
@@ -216,11 +243,27 @@ export class CommentService {
         input.targetType,
         input.targetId,
         input.userId,
-        trimmed,
+        trimmedBody,
         input.timestampSeconds
       ]
-    );
+    )) as QueryResult<Comment>;
     return result.rows[0];
+  }
+
+  /** Transactional helper — dedizierte Connection für BEGIN/COMMIT. */
+  private async withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await persistence.database.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   /**
