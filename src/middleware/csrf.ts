@@ -14,11 +14,13 @@ import AppError from '../services/error.js';
  *      dem Cookie übereinstimmen — ein Angreifer auf einer Fremdseite kann das
  *      `XSRF-TOKEN`-Cookie weder lesen noch den Header setzen.
  *
- * Greift nur, wenn ALLE Bedingungen zutreffen:
- *   - mutierende Methode (nicht GET/HEAD/OPTIONS),
- *   - der Request trägt das Cookie-Auth-Token (`access_token`) — Token-Clients
- *     (Drucker-Agent via `X-Agent-Token`) und anonyme Requests sind nicht
- *     CSRF-gefährdet und passieren ungeprüft.
+ * Greift, wenn der Request mutiert (nicht GET/HEAD/OPTIONS) UND entweder
+ *   - per Cookie authentifiziert ist (`access_token`-Cookie), ODER
+ *   - per `Authorization: Bearer …`-Header. Bearer hebelt den
+ *     SameSite-Schutz nicht aus, aber XHR aus einem fremden Tab könnte
+ *     mit gestohlenem Token Mutationen auslösen — daher zusätzlich Header
+ *     verlangen. Service-Tokens des Druckers laufen über
+ *     `X-Agent-Token`, nicht über `Authorization`, und sind unbetroffen.
  *
  * Hinweis: Die String-Literale `'XSRF-TOKEN'` (Cookie setzen) und der
  * `req.cookies['XSRF-TOKEN']`-Vergleich sind bewusst inline gehalten — die
@@ -28,6 +30,13 @@ import AppError from '../services/error.js';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const AUTH_COOKIE = 'access_token';
 const CSRF_HEADER = 'x-csrf-token';
+
+function hasBearerAuth(req: Request): boolean {
+  const header = req.headers['authorization'];
+  if (typeof header !== 'string') return false;
+  const [type, value] = header.split(' ');
+  return type === 'Bearer' && !!value;
+}
 
 /** Cookie-Optionen für das (lesbare) CSRF-Token. */
 function csrfCookieOptions() {
@@ -54,7 +63,9 @@ export const csrfGuard: RequestHandler = (req: Request, res: Response, next: Nex
   res.locals.csrfToken = token;
 
   if (SAFE_METHODS.has(req.method)) return next();
-  if (!req.cookies?.[AUTH_COOKIE]) return next();
+  // Weder Cookie-Auth noch Bearer-Auth → kein CSRF-Risiko (anonyme oder
+  // Agent-Token-Requests via `X-Agent-Token`). Passieren lassen.
+  if (!req.cookies?.[AUTH_COOKIE] && !hasBearerAuth(req)) return next();
 
   const sent = req.get(CSRF_HEADER);
   if (!sent || sent !== req.cookies['XSRF-TOKEN']) {

@@ -1,4 +1,5 @@
 import jose from 'jose';
+import crypto from 'node:crypto';
 import config from './config';
 
 interface OAuthToken {
@@ -106,7 +107,9 @@ class Auth {
     }
 
     generateToken(payload: jose.JWTPayload, secret: string, options?: jose.SignOptions) {
-        const jwt = new jose.SignJWT(payload)
+        // `jti` macht jedes Token eindeutig identifizierbar und ermöglicht
+        // gezielte Revocation beim Logout (siehe system.ts/logoutHandler).
+        const jwt = new jose.SignJWT({ jti: crypto.randomUUID(), ...payload })
             .setProtectedHeader({
                 alg: 'HS256',
                 typ: 'JWT'
