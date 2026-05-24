@@ -147,38 +147,34 @@ const createBlogComment = async (req: Request, res: Response, next: NextFunction
 
 /* ─── Shared: löschen, moderate-delete, restore ────────────────────── */
 
-/** DELETE /comments/:id — AUTH. Eigene → soft-delete. Mod → fremde
- *  soft-delete OHNE Grund (Author-Style). Für „delete with reason"
- *  gibt es PATCH /moderate. */
+/** DELETE /comments/:id — AUTH. Eigene → soft-delete. Mod auf fremde
+ *  Kommentare ist hier nicht erlaubt; Transparenz-Grund kommt über
+ *  PATCH /moderate. Wir versuchen direkt `deleteOwn` — der Service
+ *  wirft 403 wenn der Aufrufer nicht der Autor ist. Mods bekommen
+ *  einen klareren 400 statt 403, damit der UI-Hinweis auf
+ *  /moderate spezifisch ist (statt „verboten" generisch). */
 const remove = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = requireUser(req);
     const commentId = assertUuid(req.params.id, 'id');
-    const mod = await isModerator(userId);
-    if (mod) {
-      // Mod ohne expliziten Grund? Wir behandeln das als „Author-Style"-
-      // Delete und setzen den Mod als deleted_by — aber ohne Reason.
-      // Frontend rendert dann „vom Autor gelöscht", was bei einem
-      // klaren Mod-Eingriff eher als Restore-Spielraum dienen soll.
-      // Für transparente Mod-Aktionen → PATCH /moderate nutzen.
-      const existing = await commentService.getById(commentId);
-      if (!existing) {
-        return next(AppError.notFound('Kommentar nicht gefunden.', 'COMMENT_NOT_FOUND'));
+    try {
+      await commentService.deleteOwn(commentId, userId);
+      return res.status(204).send();
+    } catch (err) {
+      // Eigener Kommentar des Mods? deleteOwn ist eh durch. Sonst
+      // ersetzen wir die generische COMMENT_FORBIDDEN-Antwort durch
+      // einen sprechenderen Hinweis auf den Mod-Pfad.
+      if (err instanceof AppError.AppError && err.identifier === 'COMMENT_FORBIDDEN') {
+        const mod = await isModerator(userId);
+        if (mod) {
+          return next(AppError.badRequest(
+            'Moderator-Löschungen brauchen einen Grund — nutze PATCH /moderate.',
+            'MOD_DELETE_NEEDS_REASON'
+          ));
+        }
       }
-      // Versuche zuerst „own delete" — wenn der Mod auch der Autor ist
-      // läuft das durch. Sonst fallback: mod-action ohne reason ist
-      // verboten, weil Transparenz wichtiger ist als Convenience.
-      if (existing.userId === userId) {
-        await commentService.deleteOwn(commentId, userId);
-        return res.status(204).send();
-      }
-      return next(AppError.badRequest(
-        'Moderator-Löschungen brauchen einen Grund — nutze PATCH /moderate.',
-        'MOD_DELETE_NEEDS_REASON'
-      ));
+      throw err;
     }
-    await commentService.deleteOwn(commentId, userId);
-    return res.status(204).send();
   } catch (err) {
     return next(err);
   }
