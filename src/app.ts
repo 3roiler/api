@@ -43,11 +43,6 @@ app.use(cors({
   }
 }));
 
-// CSRF: Origin-Validierung für mutierende, Cookie-authentifizierte Requests
-// (zweite Schicht neben dem SameSite-Cookie). Muss nach cookieParser/CORS
-// laufen, da es req.cookies und den Origin-Header auswertet.
-app.use(csrfGuard);
-
 /**
  * Dedicated rate limits for credential/OAuth endpoints. These hang BEFORE
  * the global limiter so the per-IP budget is enforced per scope (login
@@ -106,6 +101,14 @@ app.use(limiter({
   max: 100,
   skip: (req) => req.path.startsWith(`${config.prefix}/admin/metrics/`)
 }));
+
+// CSRF: Double-Submit-Cookie-Validierung für mutierende, Cookie- oder
+// Bearer-authentifizierte Requests. Bewusst NACH den Rate-Limitern
+// platziert, damit ein Angreifer den Auth-Check nicht unlimitiert
+// triggern kann (CodeQL js/missing-rate-limiting). Setzt zusätzlich das
+// XSRF-TOKEN-Cookie für das SPA — nach cookieParser/CORS, vor den
+// eigentlichen Routen.
+app.use(csrfGuard);
 
 app.use(logger);
 app.use(config.prefix, routes);
