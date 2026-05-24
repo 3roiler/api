@@ -1,28 +1,16 @@
 import { Router } from 'express';
-import crypto from 'node:crypto';
 import { config, user as userService, bootstrap } from '../services/index.js';
 import auth from '../services/auth.js';
 import AppError from '../services/error.js';
+import { issueOAuthStateCookie, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
 
 const router = Router();
 
 const OAUTH_STATE_COOKIE = 'github_oauth_state';
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 min
 // Muss bei GitHub in den OAuth-App-Settings hinterlegt sein. Serverseitig
 // gesetzt, damit `req.headers.referer`/Client-Werte keinen offenen
 // Redirect-Vektor mehr eröffnen können.
 const GITHUB_REDIRECT_URI = `${config.webUrl}/callback/github`;
-
-function oauthStateCookieOptions() {
-  return {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax' as const,
-    domain: config.cookieDomain,
-    maxAge: OAUTH_STATE_TTL_MS,
-    path: config.prefix
-  };
-}
 
 async function getGithubUserInfo(accessToken: string) {
   const response = await fetch('https://api.github.com/user', {
@@ -111,40 +99,20 @@ function isGithubHostedAvatar(value: string): boolean {
  * Auth bewusst optional: anonyme Nutzer:innen sollen sich einloggen können.
  */
 router.get('/oauth-state', (_req, res) => {
-  const state = crypto.randomBytes(32).toString('base64url');
-  return res
-    .cookie(OAUTH_STATE_COOKIE, state, oauthStateCookieOptions())
-    .status(200)
-    .json({ state });
+  const state = issueOAuthStateCookie(res, OAUTH_STATE_COOKIE);
+  return res.status(200).json({ state });
 });
 
 router.post("/oauth", async (req, res, next) => {
   const { code, state } = req.body;
-  const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
 
-  // State-Cookie immer räumen — egal ob die Prüfung gelingt oder nicht.
-  res.clearCookie(OAUTH_STATE_COOKIE, {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
-    domain: config.cookieDomain,
-    path: config.prefix
-  });
+  // Räumt das State-Cookie immer ab und prüft timing-safe gegen Body.
+  if (!verifyAndClearOAuthStateCookie(req, res, OAUTH_STATE_COOKIE, state)) {
+    return res.status(400).json({ error: 'Invalid OAuth state' });
+  }
 
   if (typeof code !== 'string' || typeof state !== 'string') {
     return next(AppError.badRequest('Code and state are required and must be strings.'));
-  }
-
-  // OAuth-State-Validation: Body und Cookie müssen existieren und
-  // bytegleich sein. `timingSafeEqual` braucht gleichlange Buffer; bei
-  // Längenmismatch direkt ablehnen.
-  if (typeof cookieState !== 'string') {
-    return res.status(400).json({ error: 'Invalid OAuth state' });
-  }
-  const bodyBuf = Buffer.from(state);
-  const cookieBuf = Buffer.from(cookieState);
-  if (bodyBuf.length !== cookieBuf.length || !crypto.timingSafeEqual(bodyBuf, cookieBuf)) {
-    return res.status(400).json({ error: 'Invalid OAuth state' });
   }
 
   // Feste, serverseitige Redirect-URI — entspricht dem in der GitHub-

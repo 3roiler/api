@@ -1,34 +1,22 @@
 import { Router } from 'express';
-import crypto from 'node:crypto';
 import { config, user as userService } from '../services';
 import auth from '../services/auth.js';
 import AppError from '../services/error';
 import system from '../services/system.js';
+import { issueOAuthStateCookie, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
 
 const router = Router();
 
 const TWITCH_API_BASE = 'https://api.twitch.tv/helix';
 const OAUTH_STATE_COOKIE = 'twitch_oauth_state';
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 min
-// Twitch login names: 4–25 chars, [a-zA-Z0-9_]. We pre-validate before
-// hitting the upstream API both as a 400-fast-fail and to keep the
+// Twitch login names: 4–25 chars, word characters only. We pre-validate
+// before hitting the upstream API both as a 400-fast-fail and to keep the
 // rate-limit budget clean.
-const TWITCH_CHANNEL_RE = /^[a-zA-Z0-9_]{4,25}$/;
+const TWITCH_CHANNEL_RE = /^\w{4,25}$/;
 // Muss bei Twitch in der App-Konsole als Callback hinterlegt sein.
 // Wir generieren den Wert serverseitig und ignorieren alles vom Client —
 // `req.headers.referer` war ein offener Open-Redirect-Vektor.
 const TWITCH_REDIRECT_URI = `${config.webUrl}/callback/twitch`;
-
-function oauthStateCookieOptions() {
-  return {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax' as const,
-    domain: config.cookieDomain,
-    maxAge: OAUTH_STATE_TTL_MS,
-    path: config.prefix
-  };
-}
 
 async function getTwitchUserInfo(accessToken: string, clientId: string) {
   const response = await fetch(`${TWITCH_API_BASE}/users`, {
@@ -57,11 +45,8 @@ async function getTwitchUserInfo(accessToken: string, clientId: string) {
  * Auth bewusst optional: anonyme Nutzer:innen sollen sich einloggen können.
  */
 router.get('/oauth-state', (_req, res) => {
-  const state = crypto.randomBytes(32).toString('base64url');
-  return res
-    .cookie(OAUTH_STATE_COOKIE, state, oauthStateCookieOptions())
-    .status(200)
-    .json({ state });
+  const state = issueOAuthStateCookie(res, OAUTH_STATE_COOKIE);
+  return res.status(200).json({ state });
 });
 
 /**
@@ -70,31 +55,14 @@ router.get('/oauth-state', (_req, res) => {
  */
 router.post('/oauth', async (req, res, next) => {
   const { code, state } = req.body;
-  const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
 
-  // State-Cookie immer räumen — egal ob die Prüfung gelingt oder nicht.
-  res.clearCookie(OAUTH_STATE_COOKIE, {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
-    domain: config.cookieDomain,
-    path: config.prefix
-  });
+  // Räumt das State-Cookie immer ab und prüft timing-safe gegen Body.
+  if (!verifyAndClearOAuthStateCookie(req, res, OAUTH_STATE_COOKIE, state)) {
+    return res.status(400).json({ error: 'Invalid OAuth state' });
+  }
 
   if (typeof code !== 'string') {
     return next(AppError.badRequest('Code is required and must be a string.'));
-  }
-
-  // OAuth-State-Validation: Body und Cookie müssen existieren und
-  // bytegleich sein. `timingSafeEqual` braucht gleichlange Buffer; bei
-  // Längenmismatch direkt ablehnen.
-  if (typeof state !== 'string' || typeof cookieState !== 'string') {
-    return res.status(400).json({ error: 'Invalid OAuth state' });
-  }
-  const bodyBuf = Buffer.from(state);
-  const cookieBuf = Buffer.from(cookieState);
-  if (bodyBuf.length !== cookieBuf.length || !crypto.timingSafeEqual(bodyBuf, cookieBuf)) {
-    return res.status(400).json({ error: 'Invalid OAuth state' });
   }
 
   const { clientId, clientSecret } = config.providers.twitch;
