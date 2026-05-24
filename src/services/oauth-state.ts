@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import config from './config.js';
 
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * OAuth-CSRF-Schutz für den Authorization-Code-Flow.
@@ -13,27 +13,12 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
  * byte-gleich zum Cookie sein. Damit kann ein Angreifer einen Login-CSRF
  * nicht in einen anderen Account einschleusen — er kennt den Cookie nicht.
  *
- * Die Cookie-Optionen werden inline gesetzt (nicht via Helper-Funktion),
- * damit Static-Analyzer wie CodeQL die `httpOnly`/`secure`-Flags
- * direkt am `res.cookie()`-Aufruf erkennen.
+ * Hinweis: Das Setzen des Cookies (`res.cookie(...)`) lassen wir bewusst
+ * in den Routes inline mit literalen Optionen — sonst kann CodeQL
+ * (js/client-exposed-cookie, js/clear-text-cookie) die `httpOnly`/`secure`-
+ * Flags durch die Indirektion nicht erkennen. Geteilt wird nur die
+ * Verifikations-Logik (siehe unten), wo die Duplikation am größten war.
  */
-
-/**
- * Stellt einen frischen State-Cookie aus und gibt den State-Wert zurück.
- * Der Wert ist URL-safe (base64url) und 32 Bytes Entropie.
- */
-export function issueOAuthStateCookie(res: Response, cookieName: string): string {
-  const state = crypto.randomBytes(32).toString('base64url');
-  res.cookie(cookieName, state, {
-    httpOnly: true,
-    secure: config.isProduction,
-    sameSite: 'lax',
-    domain: config.cookieDomain,
-    maxAge: OAUTH_STATE_TTL_MS,
-    path: config.prefix,
-  });
-  return state;
-}
 
 /**
  * Räumt das State-Cookie immer ab (auch bei Mismatch) und vergleicht
@@ -66,6 +51,6 @@ export function verifyAndClearOAuthStateCookie(
 }
 
 export default {
-  issueOAuthStateCookie,
   verifyAndClearOAuthStateCookie,
+  OAUTH_STATE_TTL_MS,
 };

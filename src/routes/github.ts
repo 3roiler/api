@@ -1,8 +1,9 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import { config, user as userService, bootstrap } from '../services/index.js';
 import auth from '../services/auth.js';
 import AppError from '../services/error.js';
-import { issueOAuthStateCookie, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
+import { verifyAndClearOAuthStateCookie, OAUTH_STATE_TTL_MS } from '../services/oauth-state.js';
 
 const router = Router();
 
@@ -99,8 +100,18 @@ function isGithubHostedAvatar(value: string): boolean {
  * Auth bewusst optional: anonyme Nutzer:innen sollen sich einloggen können.
  */
 router.get('/oauth-state', (_req, res) => {
-  const state = issueOAuthStateCookie(res, OAUTH_STATE_COOKIE);
-  return res.status(200).json({ state });
+  const state = crypto.randomBytes(32).toString('base64url');
+  // Cookie-Optionen bewusst inline — CodeQL (js/client-exposed-cookie,
+  // js/clear-text-cookie) erkennt `httpOnly`/`secure` nur literal am
+  // `res.cookie()`-Aufruf.
+  return res.cookie(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: config.isProduction,
+    sameSite: 'lax',
+    domain: config.cookieDomain,
+    maxAge: OAUTH_STATE_TTL_MS,
+    path: config.prefix,
+  }).status(200).json({ state });
 });
 
 router.post("/oauth", async (req, res, next) => {
