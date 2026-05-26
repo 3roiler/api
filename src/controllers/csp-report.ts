@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { log } from '../services/logger.js';
 
 /**
  * CSP-Violation-Endpoint.
@@ -85,36 +86,42 @@ const report = (req: Request, res: Response) => {
 
   if (isClassicReport(body)) {
     const r = body['csp-report'];
-    console.warn('[csp.violation]', {
-      format: 'classic',
-      directive: r['violated-directive'] ?? r['effective-directive'],
-      blocked: r['blocked-uri'],
-      document: r['document-uri'],
-      source: r['source-file'],
-      line: r['line-number'],
-      userAgent
-    });
+    log.warn(
+      {
+        format: 'classic',
+        directive: r['violated-directive'] ?? r['effective-directive'],
+        blocked: r['blocked-uri'],
+        document: r['document-uri'],
+        source: r['source-file'],
+        line: r['line-number'],
+        userAgent
+      },
+      '[csp.violation]'
+    );
   } else if (isReportingApiArray(body)) {
     for (const entry of body) {
       // Nur CSP-Reports — die Reporting-API liefert auch andere
       // (Deprecation, Intervention, …); die ignorieren wir hier.
       if (entry.type !== 'csp-violation') continue;
       const r = entry.body ?? {};
-      console.warn('[csp.violation]', {
-        format: 'reports-api',
-        directive: r.violatedDirective ?? r.effectiveDirective,
-        blocked: r.blockedURL,
-        document: r.documentURL ?? entry.url,
-        source: r.sourceFile,
-        line: r.lineNumber,
-        disposition: r.disposition,
-        userAgent
-      });
+      log.warn(
+        {
+          format: 'reports-api',
+          directive: r.violatedDirective ?? r.effectiveDirective,
+          blocked: r.blockedURL,
+          document: r.documentURL ?? entry.url,
+          source: r.sourceFile,
+          line: r.lineNumber,
+          disposition: r.disposition,
+          userAgent
+        },
+        '[csp.violation]'
+      );
     }
   } else {
     // Unbekanntes Format — minimal loggen, damit wir's mitbekommen,
     // falls Browser Spec-Drift produzieren.
-    console.warn('[csp.violation] unknown body shape', { userAgent });
+    log.warn({ userAgent }, '[csp.violation] unknown body shape');
   }
 
   return res.status(204).end();

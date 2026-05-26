@@ -1,6 +1,7 @@
 import persistence from './persistence.js';
 import settingsService from './settings.js';
 import AppError from './error.js';
+import { log } from './logger.js';
 
 /**
  * Thin proxy in front of the DigitalOcean v2 API. Reads the operator-
@@ -172,13 +173,13 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
     // it from connectivity errors so the UI can show "aufgegeben" vs
     // "nicht erreichbar".
     if (err instanceof DOMException && err.name === 'TimeoutError') {
-      console.error('DO API fetch timed out', { path, timeoutMs: DO_FETCH_TIMEOUT_MS });
+      log.error({ path, timeoutMs: DO_FETCH_TIMEOUT_MS }, 'DO API fetch timed out');
       throw AppError.serviceUnavailable(
         `DigitalOcean API did not respond within ${DO_FETCH_TIMEOUT_MS / 1000}s.`,
         'METRICS_UPSTREAM_TIMEOUT'
       );
     }
-    console.error('DO API fetch failed', { path, err });
+    log.error({ path, err }, 'DO API fetch failed');
     throw AppError.serviceUnavailable('Could not reach DigitalOcean API.', 'METRICS_UPSTREAM_UNREACHABLE');
   }
 
@@ -189,7 +190,7 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
     // that only has `app:read` + `database:read` will work for summary but
     // not for any time-series call.
     const body = await safeReadBody(res);
-    console.error('DO API rejected token', { path, status: res.status, body });
+    log.error({ path, status: res.status, body }, 'DO API rejected token');
     throw AppError.serviceUnavailable(
       'DigitalOcean API rejected the token. Check `digitalocean.token` in the dashboard settings and ensure the PAT has the `monitoring:read` scope.',
       'METRICS_AUTH_FAILED'
@@ -200,7 +201,7 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
     // "invalid UUID format") — read it for the server log, but keep the
     // client-facing message stable.
     const body = await safeReadBody(res);
-    console.error('DO API 404', { path, body });
+    log.error({ path, body }, 'DO API 404');
     throw AppError.notFound(
       'DigitalOcean returned 404 for the requested resource. Check the configured app_id / database_id.',
       'METRICS_RESOURCE_NOT_FOUND'
@@ -214,7 +215,7 @@ async function doFetch<T = unknown>(path: string, token: string): Promise<T> {
   }
   if (!res.ok) {
     const body = await safeReadBody(res);
-    console.error('DO API returned error', { path, status: res.status, body });
+    log.error({ path, status: res.status, body }, 'DO API returned error');
     throw AppError.serviceUnavailable(
       `DigitalOcean API returned ${res.status}.`,
       'METRICS_UPSTREAM_FAILED'

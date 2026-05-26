@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { config, user as userService, bootstrap } from '../services/index.js';
+import { config, user as userService, bootstrap, log } from '../services/index.js';
 import auth from '../services/auth.js';
 import AppError from '../services/error.js';
 import { oauthStateHandler, verifyAndClearOAuthStateCookie } from '../services/oauth-state.js';
@@ -173,7 +173,7 @@ router.post("/oauth", async (req, res, next) => {
   try {
     await bootstrap.seedAdminForUser(existingUser);
   } catch (err) {
-    console.error('[github/oauth] seedAdminForUser failed:', err);
+    log.error({ err }, '[github/oauth] seedAdminForUser failed');
   }
 
   const jwtToken = await auth.generateToken({
