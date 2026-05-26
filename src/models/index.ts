@@ -363,6 +363,14 @@ export interface Clip {
   twitchClipId: string;
   submittedByUserId: UUID;
   title: string;
+  /**
+   * URL-Slug aus dem Twitch-Titel — Teil der kanonischen Clip-URL
+   * (`/streamclips/clip/<slug>-<shortid>`). Wird bei jedem Submit aus
+   * `title` generiert (siehe `slugifyTitle` in `services/clip.ts`).
+   * Eindeutigkeit kommt aus der shortid, nicht aus dem Slug; deshalb
+   * KEIN UNIQUE-Constraint in der DB. Nie leer — Fallback `'clip'`.
+   */
+  slug: string;
   broadcasterId: string | null;
   broadcasterName: string | null;
   creatorName: string | null;

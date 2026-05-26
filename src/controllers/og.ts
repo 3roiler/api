@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { clip as clipService, blog as blogService } from '../services/index.js';
+import { shortidFromId } from '../services/clip.js';
 
 /**
  * Open-Graph-Rendering für Social-Crawler (WhatsApp, Discord, X, …), die
@@ -12,6 +13,10 @@ import { clip as clipService, blog as blogService } from '../services/index.js';
 const SITE = 'https://broiler.dev';
 const DEFAULT_IMAGE = 'https://broiler.fra1.cdn.digitaloceanspaces.com/og-image.png';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Slug-Form der Clip-URL: `lustiger-clip-<8hex>`. Slug ist begrenzt auf
+// 100 Zeichen (siehe Migration 040_clip_slugs), URL-Parameter erlaubt
+// hier maximal 118 (lazy quantifier + Sicherheitsmarge gegen ReDoS).
+const SLUG_ID_RE = /^([a-z0-9][a-z0-9-]{0,118}?)-([0-9a-f]{8})$/i;
 
 /** HTML-escape für sichere Interpolation (Clip-Titel stammen von Twitch). */
 function esc(value: string): string {
@@ -174,16 +179,52 @@ function sendOg(res: Response, html: string) {
   return res.status(200).send(html);
 }
 
-/** GET /og/streamclips/clip/:id — OG für einen freigegebenen Clip. */
+/**
+ * GET /og/streamclips/clip/:id — OG für einen freigegebenen Clip.
+ *
+ * Akzeptiert zwei URL-Formen:
+ *   - UUID („alt") → 301-Redirect zur kanonischen Slug-Form. Crawler
+ *     konsolidieren den Index dadurch auf eine URL pro Clip.
+ *   - `<slug>-<shortid>` („neu", kanonisch) → wenn der Slug nicht zum
+ *     DB-Wert passt, 301 zur korrekten Schreibweise (Stack-Overflow-
+ *     Stil: schützt vor Slug-Squatting und falsch geteilten Links).
+ *
+ * `no-store` + `Vary: User-Agent` (siehe `sendOg`) verhindert, dass
+ * Cloudflare die Crawler-Antwort einem echten Browser unterschiebt.
+ */
 const clip = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = String(req.params.id);
-    if (!UUID_RE.test(id)) return next(); // → 404-Handler
-    const c = await clipService.getById(id);
+    let c: Awaited<ReturnType<typeof clipService.getById>> = null;
+    let urlSlugInRequest: string | null = null;
+
+    if (UUID_RE.test(id)) {
+      c = await clipService.getById(id);
+    } else {
+      const match = SLUG_ID_RE.exec(id);
+      if (!match) return next(); // weder UUID noch slug-shortid → 404
+      urlSlugInRequest = match[1].toLowerCase();
+      c = await clipService.getByShortid(match[2]);
+    }
     if (!c || c.status !== 'approved') return next();
+
+    // Kanonische Slug-URL aus DB. Wenn die angefragte URL davon abweicht
+    // (UUID-Form ODER falscher Slug in der Slug-Form), 301 dorthin.
+    const canonicalPath = `/streamclips/clip/${c.slug}-${shortidFromId(c.id)}`;
+    const requestedSlug = urlSlugInRequest ?? id;
+    if (urlSlugInRequest === null /* UUID-Form */ || requestedSlug !== c.slug) {
+      // 301 ist permanent — Suchmaschinen konsolidieren den Index, geben
+      // den Link-Juice der alten URL auf die neue weiter. `no-store`,
+      // damit kein Crawler die Antwort permanent cached und damit eine
+      // spätere Slug-Änderung blockiert.
+      res.set('Cache-Control', 'no-store');
+      res.set('Vary', 'User-Agent');
+      return res.redirect(301, `${SITE}${canonicalPath}`);
+    }
+
     const broadcaster = c.broadcasterName ?? 'Twitch';
     const cat = c.categoryName ? ` · ${c.categoryName}` : '';
-    const url = `${SITE}/streamclips/clip/${id}`;
+    const url = `${SITE}${canonicalPath}`;
     const image = safeImage(c.thumbnailUrl);
     // VideoObject (schema.org) — gleiche Felder wie der SPA-Pfad in
     // web/src/pages/streamclips/ClipDetail.tsx. Optionale Felder werden

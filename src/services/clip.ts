@@ -13,6 +13,54 @@ import type {
   ClipWithContext
 } from '../models/index.js';
 
+/**
+ * URL-Slugify analog zur Migration `040_clip_slugs.js` (`pg_temp.slugify_de`).
+ * Wichtig: muss beim DB-Backfill und bei neuen Submissions dasselbe
+ * Ergebnis produzieren, sonst sehen alte Clips „falsche" Slugs.
+ *
+ * - lowercase
+ * - deutsche Umlaute → ae/oe/ue/ss
+ * - akzentuierte Vokale → Basisbuchstabe (für Twitch-Titel, die oft
+ *   internationale Streamer-Namen enthalten)
+ * - alles Nicht-[a-z0-9] → `-`
+ * - mehrere `-` zusammenfassen, von vorn/hinten trimmen
+ * - auf 100 Zeichen kürzen
+ * - leer → 'clip' (Fallback)
+ */
+export function slugifyTitle(title: string | null | undefined): string {
+  let s = (title ?? '').toLowerCase();
+  s = s.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+  s = s.replace(/[éèêë]/g, 'e');
+  s = s.replace(/[áàâãå]/g, 'a');
+  s = s.replace(/[óòôõø]/g, 'o');
+  s = s.replace(/[úùûü]/g, 'u');
+  s = s.replace(/[íìîï]/g, 'i');
+  s = s.replace(/ç/g, 'c').replace(/ñ/g, 'n');
+  s = s.replace(/[^a-z0-9]+/g, '-');
+  // Leading/trailing dashes ohne Regex trimmen. Anchored quantifier
+  // wäre linear, aber Sonar S5852 flaggt `/^-+/` und `/-+$/` trotzdem
+  // konservativ als super-linear — die Index-Walk-Variante ist
+  // semantisch identisch, linear, und Analyzer-stumm.
+  let start = 0;
+  while (start < s.length && s.charCodeAt(start) === 45 /* '-' */) start++;
+  let end = s.length;
+  while (end > start && s.charCodeAt(end - 1) === 45) end--;
+  s = s.slice(start, end);
+  s = s.slice(0, 100);
+  return s || 'clip';
+}
+
+/**
+ * Die "shortid" einer Clip-URL — die ersten 8 Hex-Zeichen der UUID
+ * (Bindestriche entfernt). Disambiguator in `/streamclips/clip/<slug>-<shortid>`
+ * und Lookup-Key in `getByShortid`. 8 Hex-Zeichen = 16^8 ≈ 4 Mrd Werte;
+ * Geburtstagsparadoxon-Kollision wird bei ~65k Einträgen nennenswert
+ * — weit jenseits dessen, was Streamclips erreichen wird.
+ */
+export function shortidFromId(id: string): string {
+  return id.replace(/-/g, '').slice(0, 8).toLowerCase();
+}
+
 /** Eine Browse-Reihe ("Laufband") gruppiert nach Twitch-Kategorie. */
 export interface BrowseCategoryRow {
   gameId: string;
@@ -48,6 +96,7 @@ function clipCols(alias = ''): string {
     ${p}twitch_clip_id AS "twitchClipId",
     ${p}submitted_by_user_id AS "submittedByUserId",
     ${p}title,
+    ${p}slug,
     ${p}broadcaster_id AS "broadcasterId",
     ${p}broadcaster_name AS "broadcasterName",
     ${p}creator_name AS "creatorName",
@@ -128,15 +177,21 @@ export class ClipService {
 
     const status = await this.determineSubmitStatus(userId, section);
 
+    // URL-Slug aus dem Twitch-Titel — landet in `/streamclips/clip/<slug>-<shortid>`.
+    // Eindeutigkeit kommt aus der shortid (= UUID-Prefix), daher KEIN
+    // Dedupe-Suffix nötig. Helfer matched `pg_temp.slugify_de` aus der
+    // Migration 040_clip_slugs.
+    const urlSlug = slugifyTitle(meta.title);
+
     const result: QueryResult<Clip> = await persistence.database.query(
       `INSERT INTO public."clip"
-         (twitch_clip_id, submitted_by_user_id, title, broadcaster_id, broadcaster_name,
+         (twitch_clip_id, submitted_by_user_id, title, slug, broadcaster_id, broadcaster_name,
           creator_name, game_id, status, thumbnail_url, embed_url, video_url, duration_seconds,
           view_count, language, clip_created_at)
-       VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING ${clipCols()}`,
       [
-        slug, userId, meta.title, meta.broadcasterId, meta.broadcasterName, meta.creatorName,
+        slug, userId, meta.title, urlSlug, meta.broadcasterId, meta.broadcasterName, meta.creatorName,
         gameId, status, meta.thumbnailUrl, meta.embedUrl, meta.url, meta.duration, meta.viewCount,
         meta.language, meta.createdAt || null
       ]
@@ -418,6 +473,7 @@ export class ClipService {
     clipCount: number;
     avgScore: number | null;
     topClipId: string | null;
+    topClipSlug: string | null;
     topClipTitle: string | null;
   }[]> {
     const safeLimit = Math.min(Math.max(limit, 1), 100);
@@ -439,6 +495,7 @@ export class ClipService {
          SELECT DISTINCT ON (c.submitted_by_user_id)
            c.submitted_by_user_id AS user_id,
            c.id AS clip_id,
+           c.slug AS clip_slug,
            c.title AS clip_title
          FROM public."clip" c
          LEFT JOIN LATERAL (
@@ -460,6 +517,7 @@ export class ClipService {
          uc.clip_count AS "clipCount",
          uc.avg_score AS "avgScore",
          tc.clip_id AS "topClipId",
+         tc.clip_slug AS "topClipSlug",
          tc.clip_title AS "topClipTitle"
        FROM user_clips uc
        JOIN public."user" u ON u.id = uc.user_id
@@ -473,14 +531,46 @@ export class ClipService {
   }
 
   /** Alle freigegebenen Clips (id + updated_at) für die dynamische Sitemap. */
-  async listApprovedForSitemap(): Promise<{ id: string; updatedAt: Date | null }[]> {
-    const result: QueryResult<{ id: string; updatedAt: Date | null }> =
+  async listApprovedForSitemap(): Promise<
+    { id: string; slug: string; updatedAt: Date | null }[]
+  > {
+    const result: QueryResult<{ id: string; slug: string; updatedAt: Date | null }> =
       await persistence.database.query(
-        `SELECT id, updated_at AS "updatedAt"
+        `SELECT id, slug, updated_at AS "updatedAt"
          FROM public."clip" WHERE status = 'approved'
          ORDER BY created_at DESC`
       );
     return result.rows;
+  }
+
+  /**
+   * Lookup über die URL-shortid (= erste 8 Hex-Zeichen der UUID,
+   * Bindestriche entfernt). Treibt das Auflösen von
+   * `/streamclips/clip/<slug>-<shortid>`: das Slug-Stück ist rein
+   * dekorativ, die shortid liefert den eindeutigen Clip.
+   *
+   * Bei Kollision (sehr unwahrscheinlich, siehe `shortidFromId` Doc)
+   * gewinnt der älteste Clip — deterministisch und stabil. Indexnutzung:
+   * Postgres kann den b-tree-Index auf `id` für `LIKE 'prefix%'`
+   * verwenden, wenn das UUID-Format konsistent ist; wir casten daher
+   * zu text und LIKE auf den UUID-String (ohne Bindestriche zu fummeln,
+   * weil das die index-Nutzung kaputtmachen würde).
+   */
+  async getByShortid(shortid: string): Promise<ClipWithContext | null> {
+    if (!/^[0-9a-f]{8}$/i.test(shortid)) return null;
+    // UUID-Standardformat: ersten 8 Zeichen + `-`. Wir matchen also auf
+    // `id::text LIKE '<8hex>-%'` — bleibt index-tauglich.
+    const result: QueryResult<ClipCtxRow> = await persistence.database.query(
+      `${CLIP_CTX_SELECT}
+       WHERE c.id::text LIKE $1
+       ORDER BY c.created_at ASC
+       LIMIT 1`,
+      [`${shortid.toLowerCase()}-%`]
+    );
+    const rows = this.withAwardsStub(result.rows);
+    if (rows.length === 0) return null;
+    await this.attachAwards(rows);
+    return rows[0];
   }
 
   /**

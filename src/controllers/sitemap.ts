@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { clip as clipService, blog as blogService } from '../services/index.js';
+import { shortidFromId } from '../services/clip.js';
 
 /**
  * Dynamische sitemap.xml: statische Hub-Seiten + alle freigegebenen Clips +
@@ -104,9 +105,13 @@ const sitemap = async (_req: Request, res: Response, next: NextFunction) => {
     }
 
     for (const c of clips) {
-      entries.push(
-        urlEntry(`${SITE}/streamclips/clip/${c.id}`, isoDate(c.updatedAt), 'weekly', '0.5')
-      );
+      // Kanonische Slug-URL — passt zum 301-Redirect-Pfad im
+      // OG-Renderer und zur Frontend-Detail-Route. Google würde alte
+      // UUID-URLs zwar auch noch entdecken, aber wenn die Sitemap direkt
+      // die kanonische Form listet, spart das einen Redirect-Hop bei der
+      // Indexierung.
+      const path = `/streamclips/clip/${c.slug}-${shortidFromId(c.id)}`;
+      entries.push(urlEntry(`${SITE}${path}`, isoDate(c.updatedAt), 'weekly', '0.5'));
     }
 
     const xml =
