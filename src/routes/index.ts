@@ -1,10 +1,11 @@
-import { Router } from 'express';
+import { Router, json as jsonBodyParser } from 'express';
 import { system } from '../services';
 import { csrfTokenHandler } from '../middleware/csrf.js';
 import ogController from '../controllers/og.js';
 import sitemapController from '../controllers/sitemap.js';
 import rssController from '../controllers/rss.js';
 import commentController from '../controllers/comment.js';
+import cspReportController from '../controllers/csp-report.js';
 import user from './user.js';
 import github from './github.js';
 import twitch from './twitch.js';
@@ -42,6 +43,21 @@ router.get('/csrf', csrfTokenHandler);
 
 // Dynamische sitemap.xml (Caddy proxyt /sitemap.xml hierher). Öffentlich.
 router.get('/sitemap.xml', sitemapController.sitemap);
+
+// CSP-Violation-Endpoint — Browser senden hier hin, wenn der CSP-Header
+// blockt (z. B. inline-Script ohne Hash, externer Origin nicht in der
+// Allowlist). Zwei Content-Types unterstützen:
+//   - `application/csp-report` (klassisch, single object)
+//   - `application/reports+json` (neue Reporting-API, array)
+// Beide kommen als JSON-Body — wir verwenden den scoped json-Parser mit
+// `type: '*/*'` damit der globale `express.json()` aus app.ts (der nur
+// `application/json` akzeptiert) das nicht schluckt. Limit klein halten
+// (8 KiB) — CSP-Reports sind klein.
+router.post(
+  '/csp-report',
+  jsonBodyParser({ type: '*/*', limit: '8kb' }),
+  cspReportController.report
+);
 
 // Dynamischer RSS-Feed für den Blog. Caddy proxyt /blog/rss.xml hierher;
 // muss VOR `router.use('/blog', blog)` registriert sein, sonst fängt der
