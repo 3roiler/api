@@ -1,5 +1,9 @@
 import dotenv from 'dotenv';
 
+// Runtime: Node 26+ erwartet (Dockerfile + devcontainer.json sind in
+// IDEA-02 harmonisiert). Ältere Major-Versionen bauen evtl. noch, aber
+// die in IDEA-12 geplante Sentry-Integration setzt diagnostics_channel-
+// APIs voraus, die erst ab Node 24+ vollständig stabilisiert sind.
 dotenv.config();
 
 const isProduction = (process.env.NODE_ENV || 'development') === 'production';
