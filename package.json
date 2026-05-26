@@ -12,7 +12,13 @@
     "migrate:create": "dotenv -e .env node-pg-migrate create -m ./migrations",
     "migrate:up": "dotenv -e .env node-pg-migrate up -m ./migrations",
     "migrate:down": "dotenv -e .env node-pg-migrate down -m ./migrations",
-    "migrate:redo": "npm run migrate:down && npm run migrate:up"
+    "migrate:redo": "npm run migrate:down && npm run migrate:up",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix"
+    ]
   },
   "repository": {
     "type": "git",
@@ -47,6 +53,8 @@
     "@typescript-eslint/parser": "^8.58.2",
     "dotenv-cli": "^11.0.0",
     "eslint": "^10.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.5",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.58.2"
