@@ -37,11 +37,15 @@ export function slugifyTitle(title: string | null | undefined): string {
   s = s.replace(/[íìîï]/g, 'i');
   s = s.replace(/ç/g, 'c').replace(/ñ/g, 'n');
   s = s.replace(/[^a-z0-9]+/g, '-');
-  // Leading/trailing dashes separat trimmen — anchored single-quantifier
-  // patterns sind linear (kein Backtracking). Die alternierte Form
-  // `/^-+|-+$/g` schluckt Sonar S5852 sonst als super-linear, obwohl
-  // sie auf anchored Inputs faktisch genauso linear ist.
-  s = s.replace(/^-+/, '').replace(/-+$/, '');
+  // Leading/trailing dashes ohne Regex trimmen. Anchored quantifier
+  // wäre linear, aber Sonar S5852 flaggt `/^-+/` und `/-+$/` trotzdem
+  // konservativ als super-linear — die Index-Walk-Variante ist
+  // semantisch identisch, linear, und Analyzer-stumm.
+  let start = 0;
+  while (start < s.length && s.charCodeAt(start) === 45 /* '-' */) start++;
+  let end = s.length;
+  while (end > start && s.charCodeAt(end - 1) === 45) end--;
+  s = s.slice(start, end);
   s = s.slice(0, 100);
   return s || 'clip';
 }
