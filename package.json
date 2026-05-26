@@ -31,7 +31,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.1",
-    "jose": "^6.2.2",
+    "jose": "^6.2.3",
     "node-pg-migrate": "^8.0.4",
     "pg": "^8.20.0",
     "redis": "^5.12.1"
