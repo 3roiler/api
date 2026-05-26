@@ -26,8 +26,6 @@ endpoint. All HTTP routes live under `API_PREFIX` (default `/api`).
 - `make pg-start` / `pg-stop` / `pg-logs` / `pg-shell` — postgres + pgAdmin
   helpers (pgAdmin is gated behind the `dev` compose profile).
 - `make build` — `docker compose build` (image build, not `tsc`).
-- Note: `README.md` mentions `make start-all`; no such target exists — use
-  `make start`.
 
 ## Architecture
 
