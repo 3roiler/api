@@ -309,6 +309,235 @@ export class ClipService {
   }
 
   /**
+   * Hub-Page „Streamer": alle freigegebenen Clips eines Broadcasters,
+   * gefunden über `broadcaster_name` (case-insensitive — die URL ist
+   * `/streamclips/streamer/<lowercased-name>`). Twitch-Login-Namen sind
+   * ASCII-only `[a-zA-Z0-9_]`, daher keine Slug-Transformation nötig.
+   *
+   * Liefert auch den Display-Namen (das erste Vorkommen) und die
+   * `broadcaster_id` zurück, damit die Hub-Page einen passenden Header
+   * rendern kann ohne einen separaten Twitch-Helix-Call.
+   */
+  async listByBroadcasterName(
+    name: string,
+    limit = 50
+  ): Promise<{
+    broadcasterId: string | null;
+    broadcasterName: string;
+    clips: ClipWithContext[];
+  } | null> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const result: QueryResult<ClipCtxRow> = await persistence.database.query(
+      `${CLIP_CTX_SELECT}
+       WHERE c.status = 'approved'
+         AND lower(c.broadcaster_name) = lower($1)
+       ORDER BY COALESCE(agg.avg_score, 0) DESC NULLS LAST, agg.rating_count DESC, c.created_at DESC
+       LIMIT $2`,
+      [name, safeLimit]
+    );
+    if (result.rows.length === 0) return null;
+    const rows = this.withAwardsStub(result.rows);
+    await this.attachAwards(rows);
+    const first = rows[0];
+    return {
+      broadcasterId: first.broadcasterId,
+      broadcasterName: first.broadcasterName ?? name,
+      clips: rows
+    };
+  }
+
+  /**
+   * Hub-Page „Kategorie": alle freigegebenen Clips einer Twitch-Kategorie,
+   * gefunden über den Slug des `twitch_category.name`. Match-Logik nutzt
+   * `pg_temp.slugify_de` aus der Migration `040_clip_slugs` — Funktion
+   * existiert dort nur Session-lokal, deshalb hier inline als `WITH`-CTE.
+   * Die Kategorien-Tabelle ist klein (Twitch hat einige Tausend, aber
+   * broiler.dev cached nur die tatsächlich vergebenen) — sequentielle
+   * Slugify reicht.
+   */
+  async listByCategorySlug(
+    slug: string,
+    limit = 50
+  ): Promise<{
+    category: { id: string; name: string; section: ClipSection | null; slug: string };
+    clips: ClipWithContext[];
+  } | null> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    // Slug ist URL-Parameter; die JS-Variante des Helpers passt zur
+    // pg-Variante in Migration 040 — beide normalisieren ä/ö/ü/ß und
+    // Akzente identisch. Wir suchen also schlicht über lowercase-name
+    // mit Postgres-side slugify in einer CTE.
+    const matchRes = await persistence.database.query<{
+      id: string;
+      name: string;
+      section: ClipSection | null;
+    }>(
+      `WITH normalized AS (
+         SELECT id, name, section,
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(
+                      regexp_replace(
+                        regexp_replace(
+                          regexp_replace(
+                            regexp_replace(
+                              regexp_replace(lower(name), 'ä', 'ae', 'g'),
+                              'ö', 'oe', 'g'),
+                            'ü', 'ue', 'g'),
+                          'ß', 'ss', 'g'),
+                        '[éèêë]', 'e', 'g'),
+                      '[áàâãå]', 'a', 'g'),
+                    '[óòôõø]', 'o', 'g'),
+                  '[^a-z0-9]+', '-', 'g') AS raw_slug
+         FROM public."twitch_category"
+       )
+       SELECT id, name, section
+       FROM normalized
+       WHERE trim(BOTH '-' FROM raw_slug) = $1
+       LIMIT 1`,
+      [slug]
+    );
+    const category = matchRes.rows[0];
+    if (!category) return null;
+
+    const result: QueryResult<ClipCtxRow> = await persistence.database.query(
+      `${CLIP_CTX_SELECT}
+       WHERE c.status = 'approved' AND c.game_id = $1
+       ORDER BY COALESCE(agg.avg_score, 0) DESC NULLS LAST, agg.rating_count DESC, c.created_at DESC
+       LIMIT $2`,
+      [category.id, safeLimit]
+    );
+    const rows = this.withAwardsStub(result.rows);
+    await this.attachAwards(rows);
+    return {
+      category: { ...category, slug },
+      clips: rows
+    };
+  }
+
+  /**
+   * Hub-Page „Award": alle freigegebenen Clips, die mit dem gegebenen
+   * Award (über `award_category.key`) ausgezeichnet wurden. Sortiert
+   * nach Anzahl der Award-Stimmen für genau diesen Award DESC, danach
+   * Gesamt-Score. Award-Key ist bereits Slug-Form (`'funniest'`, …).
+   */
+  async listByAwardKey(
+    key: string,
+    limit = 50
+  ): Promise<{
+    award: { id: string; key: string; displayName: string; emoji: string | null; color: string | null };
+    clips: ClipWithContext[];
+  } | null> {
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const awardRes = await persistence.database.query<{
+      id: string;
+      key: string;
+      displayName: string;
+      emoji: string | null;
+      color: string | null;
+    }>(
+      `SELECT id, key, display_name AS "displayName", emoji, color
+       FROM public."award_category"
+       WHERE key = $1 AND is_active = true`,
+      [key]
+    );
+    const award = awardRes.rows[0];
+    if (!award) return null;
+
+    const result: QueryResult<ClipCtxRow & { awardVotes: number }> = await persistence.database.query(
+      `SELECT ${clipCols('c')},
+         u.name AS "submitterName",
+         u.display_name AS "submitterDisplayName",
+         u.avatar_url AS "submitterAvatarUrl",
+         tc.name AS "categoryName",
+         tc.section AS "section",
+         COALESCE(agg.rating_count, 0)::int AS "ratingCount",
+         agg.avg_score::float8 AS "avgScore",
+         award_agg.votes::int AS "awardVotes"
+       FROM public."clip" c
+       JOIN public."user" u ON u.id = c.submitted_by_user_id
+       LEFT JOIN public."twitch_category" tc ON tc.id = c.game_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) FILTER (WHERE r.score IS NOT NULL) AS rating_count,
+                AVG(r.score) FILTER (WHERE r.score IS NOT NULL) AS avg_score
+         FROM public."clip_rating" r WHERE r.clip_id = c.id
+       ) agg ON true
+       JOIN LATERAL (
+         SELECT COUNT(*)::int AS votes
+         FROM public."clip_rating" r
+         JOIN public."clip_rating_award" ra ON ra.rating_id = r.id
+         WHERE r.clip_id = c.id AND ra.award_id = $1::uuid
+       ) award_agg ON award_agg.votes > 0
+       WHERE c.status = 'approved'
+       ORDER BY award_agg.votes DESC, COALESCE(agg.avg_score, 0) DESC NULLS LAST, c.created_at DESC
+       LIMIT $2`,
+      [award.id, safeLimit]
+    );
+    const rows = this.withAwardsStub(result.rows);
+    await this.attachAwards(rows);
+    return { award, clips: rows };
+  }
+
+  /**
+   * Distinct broadcasters mit ≥1 freigegebenem Clip — für die Sitemap-
+   * Erweiterung um Streamer-Hub-URLs. `updatedAt` ist das jüngste Update
+   * eines Clips, damit die Hub-Page ein sinnvolles `lastmod` bekommt.
+   */
+  async listSitemapBroadcasters(): Promise<
+    { broadcasterName: string; updatedAt: Date | null }[]
+  > {
+    const result = await persistence.database.query<{
+      broadcasterName: string;
+      updatedAt: Date | null;
+    }>(
+      `SELECT broadcaster_name AS "broadcasterName",
+              MAX(COALESCE(updated_at, created_at)) AS "updatedAt"
+       FROM public."clip"
+       WHERE status = 'approved' AND broadcaster_name IS NOT NULL
+       GROUP BY broadcaster_name
+       ORDER BY broadcaster_name`
+    );
+    return result.rows;
+  }
+
+  /** Twitch-Kategorien mit ≥1 freigegebenem Clip — Sitemap-Hub-Listing. */
+  async listSitemapCategories(): Promise<
+    { name: string; updatedAt: Date | null }[]
+  > {
+    const result = await persistence.database.query<{
+      name: string;
+      updatedAt: Date | null;
+    }>(
+      `SELECT tc.name AS "name",
+              MAX(COALESCE(c.updated_at, c.created_at)) AS "updatedAt"
+       FROM public."twitch_category" tc
+       JOIN public."clip" c ON c.game_id = tc.id
+       WHERE c.status = 'approved'
+       GROUP BY tc.name
+       ORDER BY tc.name`
+    );
+    return result.rows;
+  }
+
+  /** Aktive Awards mit ≥1 Stimme auf einem freigegebenen Clip. */
+  async listSitemapAwards(): Promise<
+    { key: string; updatedAt: Date | null }[]
+  > {
+    const result = await persistence.database.query<{ key: string; updatedAt: Date | null }>(
+      `SELECT ac.key,
+              MAX(COALESCE(c.updated_at, c.created_at)) AS "updatedAt"
+       FROM public."award_category" ac
+       JOIN public."clip_rating_award" ra ON ra.award_id = ac.id
+       JOIN public."clip_rating" r ON r.id = ra.rating_id
+       JOIN public."clip" c ON c.id = r.clip_id
+       WHERE ac.is_active = true AND c.status = 'approved'
+       GROUP BY ac.key
+       ORDER BY ac.key`
+    );
+    return result.rows;
+  }
+
+  /**
    * Personalisierter „Für dich"-Feed (v2).
    *
    * Im Kern ein simples scoring-Modell mit drei Signalen, mehr braucht's
