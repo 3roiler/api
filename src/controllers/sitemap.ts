@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { clip as clipService, blog as blogService } from '../services/index.js';
-import { shortidFromId } from '../services/clip.js';
+import { shortidFromId, slugifyTitle } from '../services/clip.js';
 
 /**
  * Dynamische sitemap.xml: statische Hub-Seiten + alle freigegebenen Clips +
@@ -70,9 +70,12 @@ function staticLastmod(
 
 const sitemap = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const [clips, posts] = await Promise.all([
+    const [clips, posts, hubBroadcasters, hubCategories, hubAwards] = await Promise.all([
       clipService.listApprovedForSitemap(),
-      blogService.listPosts({ viewerId: null, limit: 10000 })
+      blogService.listPosts({ viewerId: null, limit: 10000 }),
+      clipService.listSitemapBroadcasters(),
+      clipService.listSitemapCategories(),
+      clipService.listSitemapAwards()
     ]);
 
     // Jüngstes Datum aus den dynamischen Inhalten — Hub-Pages spiegeln
@@ -112,6 +115,46 @@ const sitemap = async (_req: Request, res: Response, next: NextFunction) => {
       // Indexierung.
       const path = `/streamclips/clip/${c.slug}-${shortidFromId(c.id)}`;
       entries.push(urlEntry(`${SITE}${path}`, isoDate(c.updatedAt), 'weekly', '0.5'));
+    }
+
+    // ─── Hub-Pages ────────────────────────────────────────────────────
+    // Long-Tail-SEO: pro Streamer / Twitch-Kategorie / Award eine
+    // Listen-Page mit allen freigegebenen Clips. Diese URLs rankt Google
+    // typischerweise auf Namens-Suchen („papaplatte clips deutsch",
+    // „lol clips") gut, weil sie thematische Hubs sind.
+    for (const b of hubBroadcasters) {
+      // URL-Form: lowercased Twitch-Login. Helix erlaubt nur ASCII
+      // `[a-zA-Z0-9_]`, encodeURIComponent ist defensiv für historische
+      // Daten.
+      entries.push(
+        urlEntry(
+          `${SITE}/streamclips/streamer/${encodeURIComponent(b.broadcasterName.toLowerCase())}`,
+          isoDate(b.updatedAt),
+          'weekly',
+          '0.6'
+        )
+      );
+    }
+    for (const cat of hubCategories) {
+      const slug = slugifyTitle(cat.name);
+      entries.push(
+        urlEntry(
+          `${SITE}/streamclips/kategorie/${slug}`,
+          isoDate(cat.updatedAt),
+          'weekly',
+          '0.6'
+        )
+      );
+    }
+    for (const a of hubAwards) {
+      entries.push(
+        urlEntry(
+          `${SITE}/streamclips/award/${encodeURIComponent(a.key)}`,
+          isoDate(a.updatedAt),
+          'weekly',
+          '0.5'
+        )
+      );
     }
 
     const xml =

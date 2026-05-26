@@ -34,6 +34,13 @@ router.get('/by-broadcaster/:broadcasterId', clipController.byBroadcaster);
 // Aufrufer eingeloggt ist).
 router.get('/by-shortid/:shortid', system.optionalAuthHandler, clipController.getByShortid);
 
+// Hub-Page-Endpunkte (SEO-Long-Tail) — alle freigegebenen Clips eines
+// Streamers / einer Twitch-Kategorie / mit einem bestimmten Award.
+// Öffentlich, kein Auth-Header nötig.
+router.get('/by-broadcaster-name/:name', clipController.byBroadcasterName);
+router.get('/by-category/:slug', clipController.byCategorySlug);
+router.get('/by-award/:key', clipController.byAwardKey);
+
 // ── Auth-pflichtig (statische Pfade VOR dem öffentlichen /:id) ──
 router.get('/feed/next', system.authHandler, clipController.feedNext);
 router.get('/feed/foryou', system.authHandler, clipController.feedForYou);

@@ -282,7 +282,75 @@ const contributors = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
+/**
+ * GET /api/clips/by-broadcaster-name/:name — PUBLIC. Hub-Page „Streamer".
+ * Case-insensitive Match auf `broadcaster_name`; gibt zusätzlich
+ * broadcasterId + Display-Name zurück, damit das Frontend einen Header
+ * mit korrekter Schreibweise rendern kann.
+ */
+const byBroadcasterName = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const name = String(req.params.name ?? '').trim();
+    // Twitch-Logins sind 4–25 Zeichen `[a-zA-Z0-9_]`. Wir validieren etwas
+    // lockerer (auch `.` und `-`), um falsche URL-Encodings nicht hart
+    // zu blockieren, aber harte Sonderzeichen rausfiltern.
+    if (!name || !/^[a-z0-9_.-]{1,64}$/i.test(name)) {
+      return next(AppError.badRequest('Ungültiger Streamer-Name.', 'BAD_BROADCASTER_NAME'));
+    }
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 50;
+    const data = await clipService.listByBroadcasterName(name, limit);
+    if (!data) return next(AppError.notFound('Streamer nicht gefunden.', 'BROADCASTER_NOT_FOUND'));
+    return res.status(200).json(data);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * GET /api/clips/by-category/:slug — PUBLIC. Hub-Page „Kategorie".
+ * Slug-Match in Postgres gegen `slugify(twitch_category.name)`.
+ */
+const byCategorySlug = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const slug = String(req.params.slug ?? '').toLowerCase().trim();
+    if (!slug || !/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)) {
+      return next(AppError.badRequest('Ungültiger Kategorie-Slug.', 'BAD_CATEGORY_SLUG'));
+    }
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 50;
+    const data = await clipService.listByCategorySlug(slug, limit);
+    if (!data) return next(AppError.notFound('Kategorie nicht gefunden.', 'CATEGORY_NOT_FOUND'));
+    return res.status(200).json(data);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * GET /api/clips/by-award/:key — PUBLIC. Hub-Page „Award".
+ * `award_category.key` ist bereits Slug-Form (`funniest`, `best_play`, …).
+ */
+const byAwardKey = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const key = String(req.params.key ?? '').toLowerCase().trim();
+    // `award_category.key` Check-Constraint in der Migration:
+    // `^[a-z][a-z0-9_]{1,38}[a-z0-9]$`. Hier dieselbe Vorvalidierung.
+    if (!key || !/^[a-z][a-z0-9_]{1,38}[a-z0-9]$/.test(key)) {
+      return next(AppError.badRequest('Ungültiger Award-Key.', 'BAD_AWARD_KEY'));
+    }
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 50;
+    const data = await clipService.listByAwardKey(key, limit);
+    if (!data) return next(AppError.notFound('Award nicht gefunden.', 'AWARD_NOT_FOUND'));
+    return res.status(200).json(data);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export default {
   submit, feedNext, feedForYou, rate, mine, getById, getByShortid,
-  report, leaderboard, browse, search, byBroadcaster, contributors
+  report, leaderboard, browse, search, byBroadcaster, contributors,
+  byBroadcasterName, byCategorySlug, byAwardKey
 };
