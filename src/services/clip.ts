@@ -37,7 +37,11 @@ export function slugifyTitle(title: string | null | undefined): string {
   s = s.replace(/[íìîï]/g, 'i');
   s = s.replace(/ç/g, 'c').replace(/ñ/g, 'n');
   s = s.replace(/[^a-z0-9]+/g, '-');
-  s = s.replace(/^-+|-+$/g, '');
+  // Leading/trailing dashes separat trimmen — anchored single-quantifier
+  // patterns sind linear (kein Backtracking). Die alternierte Form
+  // `/^-+|-+$/g` schluckt Sonar S5852 sonst als super-linear, obwohl
+  // sie auf anchored Inputs faktisch genauso linear ist.
+  s = s.replace(/^-+/, '').replace(/-+$/, '');
   s = s.slice(0, 100);
   return s || 'clip';
 }
