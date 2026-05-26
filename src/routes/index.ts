@@ -48,6 +48,13 @@ router.get('/sitemap.xml', sitemapController.sitemap);
 // Blog-Router das ab und versucht „rss.xml" als Post-Slug zu interpretieren.
 router.get('/blog/rss.xml', rssController.feed);
 
+// Streamclips-RSS — selbes Pattern wie der Blog-Feed. MUSS vor
+// `router.use('/clips', clips)` stehen, sonst greift dort z. B. das
+// `/clips/:id`-Routing und wir bekommen einen CLIP_NOT_FOUND-404.
+// Pfad ist `/clips/rss.xml`; Caddy proxyt `/streamclips/rss.xml`
+// hierher (siehe web/Caddyfile).
+router.get('/clips/rss.xml', rssController.clipFeed);
+
 // Open-Graph für Social-Crawler (Caddy leitet nur Crawler-UAs hierher um).
 // Öffentlich + nur lesend; rendert serverseitig Meta-Tags für teilbare Seiten.
 router.get('/og/streamclips/clip/:id', ogController.clip);

@@ -773,6 +773,31 @@ export class ClipService {
   }
 
   /**
+   * Jüngste freigegebene Clips für den RSS-Feed. Anders als
+   * `listApprovedForSitemap` liefert das `Clip`-Vollshape, weil der Feed
+   * Title + Broadcaster + Thumbnail braucht, nicht nur id/slug/mtime.
+   *
+   * Limit ist auf 30 gedeckelt — RSS-Reader fragen alle paar Minuten,
+   * und 30 Einträge entsprechen ~1–2 Wochen Output bei aktuellem
+   * Submission-Volumen. Sortierung: `clip_created_at` (= Twitch-Datum)
+   * mit Fallback auf `created_at` (broiler-Submit). Das Twitch-Datum
+   * hat für RSS-Reader mehr Aussage als „wann hat broiler den Clip
+   * gesehen".
+   */
+  async listApprovedForRss(limit = 30): Promise<Clip[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 30);
+    const result: QueryResult<Clip> = await persistence.database.query(
+      `SELECT ${clipCols()}
+       FROM public."clip"
+       WHERE status = 'approved'
+       ORDER BY COALESCE(clip_created_at, created_at) DESC
+       LIMIT $1`,
+      [safeLimit]
+    );
+    return result.rows;
+  }
+
+  /**
    * Lookup über die URL-shortid (= erste 8 Hex-Zeichen der UUID,
    * Bindestriche entfernt). Treibt das Auflösen von
    * `/streamclips/clip/<slug>-<shortid>`: das Slug-Stück ist rein
