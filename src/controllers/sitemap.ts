@@ -41,9 +41,31 @@ const STATIC: { path: string; changefreq: string; priority: string }[] = [
   { path: '/blog', changefreq: 'weekly', priority: '0.8' },
   { path: '/streamclips', changefreq: 'daily', priority: '0.8' },
   { path: '/streamclips/leaderboard', changefreq: 'daily', priority: '0.7' },
+  { path: '/streamclips/contributors', changefreq: 'weekly', priority: '0.5' },
   { path: '/impressum', changefreq: 'yearly', priority: '0.2' },
   { path: '/datenschutz', changefreq: 'yearly', priority: '0.2' }
 ];
+
+/**
+ * `lastmod` für statische Pages: jüngstes Datum aus allen freigegebenen
+ * Clips bzw. veröffentlichten Posts. So bekommen die Hub-URLs ein
+ * sinnvolles Aktualisierungs-Signal an Google, ohne dass wir hier ein
+ * statisches Build-Datum pflegen müssen (was beim API-Restart wandert).
+ * Falls noch nichts existiert: aktuelles Datum als sinnvoller Fallback.
+ */
+function staticLastmod(
+  clipMtimes: (Date | null | undefined)[],
+  postMtimes: (Date | null | undefined)[]
+): string {
+  const all: number[] = [];
+  for (const v of [...clipMtimes, ...postMtimes]) {
+    if (v == null) continue;
+    const t = v instanceof Date ? v.getTime() : new Date(v).getTime();
+    if (!Number.isNaN(t)) all.push(t);
+  }
+  const max = all.length > 0 ? Math.max(...all) : Date.now();
+  return new Date(max).toISOString().slice(0, 10);
+}
 
 const sitemap = async (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -52,8 +74,20 @@ const sitemap = async (_req: Request, res: Response, next: NextFunction) => {
       blogService.listPosts({ viewerId: null, limit: 10000 })
     ]);
 
+    // Jüngstes Datum aus den dynamischen Inhalten — Hub-Pages spiegeln
+    // damit „letztes Update" wieder, ohne auf eine separate Quelle (z. B.
+    // Build-Datum) angewiesen zu sein. Posts werden hier auf öffentlich
+    // gefiltert, damit private/group-Beiträge die lastmod nicht verzerren.
+    const publicPostMtimes = posts
+      .filter((p) => p.visibility === 'public')
+      .map((p) => p.updatedAt ?? p.publishedAt);
+    const lastmodForStatic = staticLastmod(
+      clips.map((c) => c.updatedAt),
+      publicPostMtimes
+    );
+
     const entries: string[] = STATIC.map((s) =>
-      urlEntry(`${SITE}${s.path}`, undefined, s.changefreq, s.priority)
+      urlEntry(`${SITE}${s.path}`, lastmodForStatic, s.changefreq, s.priority)
     );
 
     for (const p of posts) {
@@ -82,7 +116,11 @@ const sitemap = async (_req: Request, res: Response, next: NextFunction) => {
       `</urlset>\n`;
 
     res.set('Content-Type', 'application/xml; charset=utf-8');
-    res.set('Cache-Control', 'public, max-age=3600');
+    // 10 Min: ein neu freigegebener Clip taucht innerhalb dieser Zeit in
+    // der Sitemap auf. 1h wäre für reine Crawl-Frequenz ok, aber Search
+    // Console schaut nach Push-Pings (siehe Task IndexNow) auch direkt
+    // hier rein — und für Edge-Caches (DigitalOcean LB) ist 10 Min plenty.
+    res.set('Cache-Control', 'public, max-age=600');
     return res.status(200).send(xml);
   } catch (err) {
     return next(err);
