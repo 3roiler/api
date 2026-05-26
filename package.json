@@ -31,6 +31,7 @@
   },
   "homepage": "https://broiler.dev/",
   "dependencies": {
+    "@sentry/node": "^10.53.1",
     "body-parser": "^2.2.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

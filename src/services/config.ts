@@ -73,6 +73,22 @@ const secretsKey = process.env.SECRETS_KEY || '';
  */
 const gcodeMaxBytes = Number.parseInt(process.env.GCODE_MAX_BYTES || '52428800', 10);
 
+/**
+ * Sentry-DSN für Error-Tracking. Leer = Sentry deaktiviert (kein init).
+ * Format: `https://<key>@<org>.ingest.de.sentry.io/<project>`. EU-Region
+ * verwenden, weil broiler.dev DSGVO-pflichtig ist. Setzen in
+ * DigitalOcean App Platform als verschlüsselte Environment-Variable.
+ */
+const sentryDsn = process.env.SENTRY_DSN || '';
+
+/**
+ * Tracing-Sample-Rate für Sentry-Performance-Monitoring. 0 (= aus) im
+ * Default, weil Performance-Sampling Kosten produziert und das Free-Tier-
+ * Budget von 10k Transactions/Monat schnell verbraucht. Bei Bedarf auf
+ * 0.1 (= 10 %) hochsetzen.
+ */
+const sentryTracesSampleRate = Number(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0;
+
 const github = {
   clientId: process.env.GITHUB_CLIENT_ID || '',
   clientSecret: process.env.GITHUB_CLIENT_SECRET || ''
@@ -104,7 +120,9 @@ export const config = {
   corsOrigin,
   adminEmails,
   secretsKey,
-  gcodeMaxBytes
+  gcodeMaxBytes,
+  sentryDsn,
+  sentryTracesSampleRate
 };
 
 export default config;
