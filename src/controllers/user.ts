@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { user, error, system } from '../services';
+import { user, error, system, log } from '../services';
 import type { SocialLinkInput } from '../services/user.js';
 
 const DISPLAY_NAME_MAX = 100;
@@ -240,7 +240,7 @@ const nukeMePlease = async (req: Request, res: Response, next: NextFunction) => 
     return next(error.unauthorized('No authenticated user.'));
   }
 
-  console.info(`User ${req.userId} requested self-anonymisation`);
+  log.info({ userId: req.userId }, 'User requested self-anonymisation');
 
   // JWT zuerst in den Revocation-Cache schreiben — sonst könnte der
   // anonymisierte User mit dem alten Token noch bis zur natürlichen

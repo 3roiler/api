@@ -4,6 +4,7 @@ import type { User, SocialLink } from '../models/index.js';
 import { UUID } from 'node:crypto';
 import auth from './auth.js';
 import config from './config.js';
+import { log } from './logger.js';
 
 const USER_COLUMNS = `
   id,
@@ -445,7 +446,7 @@ export class UserService {
       try {
         await auth.revokeTwitch(twitchToken.accessToken, config.providers.twitch.clientId);
       } catch (err) {
-        console.warn(`[anonymizeUser] Twitch token revoke failed for user ${id}:`, err);
+        log.warn({ userId: id, err }, '[anonymizeUser] Twitch token revoke failed');
       }
     }
 

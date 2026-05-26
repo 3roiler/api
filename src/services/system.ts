@@ -6,6 +6,7 @@ import persistence from './persistence.js';
 import config from './config.js';
 import auth from './auth.js';
 import { user } from './index.js';
+import { log } from './logger.js';
 import { JWTExpired, JWTInvalid } from 'jose/errors';
 
 declare global {
@@ -67,7 +68,7 @@ async function verifyToken(token: string) {
       throw AppError.unauthorized('Invalid token');
     }
 
-    console.error('Token verification error:', error);
+    log.error({ err: error }, 'Token verification error');
     throw AppError.unauthorized('Token verification failed');
   }
 }
@@ -284,7 +285,7 @@ async function revokeCurrentToken(req: Request, contextLabel: string): Promise<v
       }
     }
   } catch (err) {
-    console.warn(`[${contextLabel}] could not decode token for revocation:`, err);
+    log.warn({ context: contextLabel, err }, 'could not decode token for revocation');
   }
 }
 
@@ -325,7 +326,7 @@ const errorHandler = (
       method: req.method
     }
   });
-  console.error('ERROR 💥:', err);
+  log.error({ err, path: req.path, method: req.method }, 'unhandled error in request handler');
 
   return res.status(500).json({
     identifier: 'API_ERROR',
@@ -338,7 +339,7 @@ async function checkDatabase(): Promise<boolean> {
     await persistence.database.query('SELECT 1');
     return true;
   } catch (error) {
-    console.error('Database health check failed:', error);
+    log.error({ err: error }, 'Database health check failed');
     return false;
   }
 }
@@ -348,7 +349,7 @@ async function checkCache(): Promise<boolean> {
     await persistence.cache.ping();
     return true;
   } catch (error) {
-    console.error('Cache health check failed:', error);
+    log.error({ err: error }, 'Cache health check failed');
     return false;
   }
 }

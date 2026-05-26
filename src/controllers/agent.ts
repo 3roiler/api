@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import {
   printer as printerService,
   printJob as printJobService,
-  gcode as gcodeService
+  gcode as gcodeService,
+  log
 } from '../services/index.js';
 import persistence from '../services/persistence.js';
 import AppError from '../services/error.js';
@@ -62,7 +63,7 @@ export const agentAuthHandler = async (req: Request, _res: Response, next: NextF
     // the status write so a slow DB doesn't bottleneck the poll loop,
     // but we surface errors to the logger.
     printerService.updateStatus(printer.id, { touchLastSeen: true })
-      .catch((err) => console.error('[agent] touchLastSeen failed:', err));
+      .catch((err) => log.error({ err }, '[agent] touchLastSeen failed'));
 
     return next();
   } catch (err) {

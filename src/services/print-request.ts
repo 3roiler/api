@@ -5,7 +5,6 @@ import type {
   PrintRequest,
   PrintRequestComment,
   PrintRequestCommentWithAuthor,
-  PrintRequestSourceType,
   PrintRequestStatus,
   PrintRequestWithContext
 } from '../models/index.js';

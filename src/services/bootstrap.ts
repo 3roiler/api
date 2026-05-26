@@ -1,5 +1,6 @@
 import config from './config.js';
 import userService from './user.js';
+import { log } from './logger.js';
 import type { User } from '../models/index.js';
 
 /**
@@ -57,14 +58,14 @@ async function seedAdminPermissions(): Promise<void> {
   for (const email of config.adminEmails) {
     const user = await userService.getUserByEmail(email);
     if (!user) {
-      console.info(`[bootstrap] admin email ${email} has no user yet — will retry on next boot or after first login.`);
+      log.info({ email }, '[bootstrap] admin email has no user yet — will retry on next boot or after first login.');
       continue;
     }
 
     for (const permission of ADMIN_PERMISSIONS) {
       await userService.grantPermission(user.id, permission);
     }
-    console.info(`[bootstrap] granted ${ADMIN_PERMISSIONS.length} admin permission(s) to ${email}.`);
+    log.info({ email, count: ADMIN_PERMISSIONS.length }, '[bootstrap] granted admin permissions.');
   }
 }
 
@@ -90,7 +91,7 @@ async function seedAdminForUser(user: User): Promise<void> {
   for (const permission of ADMIN_PERMISSIONS) {
     await userService.grantPermission(user.id, permission);
   }
-  console.info(`[bootstrap] granted admin permission(s) to ${user.email} on login.`);
+  log.info({ email: user.email }, '[bootstrap] granted admin permission(s) on login.');
 }
 
 export default {

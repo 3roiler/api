@@ -1,7 +1,7 @@
 import config from './config';
 import database from './persistence';
 import error from './error';
-import logger from './logger';
+import logger, { log } from './logger';
 import system from './system';
 import user from './user';
 import blog from './blog';
@@ -27,6 +27,7 @@ export {
   database,
   error,
   logger,
+  log,
   system,
   user,
   blog,
