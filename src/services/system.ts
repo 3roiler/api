@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction, type RequestHandler } from 'express';
+import * as Sentry from '@sentry/node';
 import jose from 'jose';
 import AppError from './error.js';
 import persistence from './persistence.js';
@@ -313,6 +314,17 @@ const errorHandler = (
     });
   }
 
+  // Non-AppError = unerwarteter 500er. An Sentry melden, sofern
+  // SENTRY_DSN gesetzt ist; ohne DSN ist `captureException` ein
+  // No-Op (siehe services/sentry.ts). Wir attachen den Request-
+  // Path als Tag, damit Aggregation in der Sentry-UI brauchbar wird.
+  Sentry.captureException(err, {
+    tags: {
+      // `req.path` enthält noch keine Query — gut für Aggregation.
+      path: req.path,
+      method: req.method
+    }
+  });
   console.error('ERROR 💥:', err);
 
   return res.status(500).json({

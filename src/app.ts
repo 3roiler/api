@@ -1,3 +1,9 @@
+// MUST be the very first import — Sentry's auto-instrumentation
+// hooks into module-load and would miss `express`/`pg`/`redis` if
+// they were imported before this line. See `services/sentry.ts` for
+// behaviour when SENTRY_DSN is unset (no-op).
+import './services/sentry.js';
+
 import express, { Application, Request, Response, NextFunction } from 'express';
 import limiter from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
@@ -138,9 +144,20 @@ app.listen(config.port, () => {
   });
 });
 
-process.on('unhandledRejection', (err: Error) => {
+process.on('unhandledRejection', async (err: Error) => {
   console.error('UNHANDLED REJECTION! 💥 Shutting down...');
   console.error(err.name, err.message);
+  // Sentry braucht einen flush vor exit, sonst gehen die letzten Events
+  // verloren. 2 s Timeout reicht — länger wäre Verschleppung des
+  // Restart-Loops, kürzer riskiert Drop. No-op wenn Sentry inaktiv.
+  try {
+    const Sentry = await import('@sentry/node');
+    Sentry.captureException(err);
+    await Sentry.flush(2000);
+  } catch {
+    // Wenn der dynamic import selbst fehlschlägt — nicht ideal, aber
+    // wir wollten ohnehin shutdownen.
+  }
   process.exit(1);
 });
 
