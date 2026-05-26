@@ -96,11 +96,20 @@ interface OgData {
  */
 function markdownToPlainExcerpt(md: string | null | undefined, maxLen = 500): string {
   if (!md) return '';
-  const stripped = md
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`[^`]*`/g, ' ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+  // Length cap before regex: ReDoS-Schutz für die Quantifier unten,
+  // und die obere Grenze (~256 kB) übersteigt jeden realistischen Blog-
+  // Beitrag. Kommt von Postgres aber nicht direkt vom User, dennoch
+  // defense-in-depth.
+  const safe = md.length > 262144 ? md.slice(0, 262144) : md;
+  // Quantifier-Obergrenzen statt unbegrenzter `+`/`*` — SonarCloud S5852
+  // markiert sonst die Link-/Image-Patterns als super-linear (backtracking
+  // bei manipulierten Inputs wie `[aaaa…aaaa(` ohne schließendes `]`/`)`).
+  // 500/2000 sind sehr großzügig und decken jeden echten Markdown-Link.
+  const stripped = safe
+    .replace(/```[\s\S]{0,8192}?```/g, ' ')
+    .replace(/`[^`\n]{0,500}`/g, ' ')
+    .replace(/!\[[^\]\n]{0,500}\]\([^)\n]{0,2000}\)/g, ' ')
+    .replace(/\[([^\]\n]{1,500})\]\([^)\n]{1,2000}\)/g, '$1')
     .replace(/[#*_>~]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
