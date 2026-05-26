@@ -137,6 +137,28 @@ const getById = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+/**
+ * GET /api/clips/by-shortid/:shortid — Lookup über die URL-shortid
+ * (= erste 8 Hex-Zeichen der UUID, Bindestriche entfernt). Treibt die
+ * kanonische Slug-URL `/streamclips/clip/<slug>-<shortid>` im Frontend.
+ *
+ * Validierung passiert im Service (`/^[0-9a-f]{8}$/`); ungültige Werte
+ * geben `null` zurück und enden hier in `CLIP_NOT_FOUND`.
+ */
+const getByShortid = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const shortid = String(req.params.shortid ?? '');
+    const clip = await clipService.getByShortid(shortid);
+    if (!clip) return next(AppError.notFound('Clip nicht gefunden.', 'CLIP_NOT_FOUND'));
+    const myRating = req.userId
+      ? await clipRatingService.getUserRating(req.userId, clip.id)
+      : null;
+    return res.status(200).json({ ...clip, myRating });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 /** POST /api/clips/:id/report — Body: { reason }. */
 const report = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -261,6 +283,6 @@ const contributors = async (req: Request, res: Response, next: NextFunction) => 
 };
 
 export default {
-  submit, feedNext, feedForYou, rate, mine, getById,
+  submit, feedNext, feedForYou, rate, mine, getById, getByShortid,
   report, leaderboard, browse, search, byBroadcaster, contributors
 };

@@ -28,6 +28,12 @@ router.get('/contributors', clipController.contributors);
 // `broadcasterId` ist eine numerische Twitch-User-ID, kein UUID.
 router.get('/by-broadcaster/:broadcasterId', clipController.byBroadcaster);
 
+// Lookup über die URL-shortid (= 8-Hex-Prefix der UUID). Treibt die
+// kanonische Slug-URL `/streamclips/clip/<slug>-<shortid>` im Frontend.
+// Öffentlich (auth-optional, damit `myRating` mitkommt, wenn der
+// Aufrufer eingeloggt ist).
+router.get('/by-shortid/:shortid', system.optionalAuthHandler, clipController.getByShortid);
+
 // ── Auth-pflichtig (statische Pfade VOR dem öffentlichen /:id) ──
 router.get('/feed/next', system.authHandler, clipController.feedNext);
 router.get('/feed/foryou', system.authHandler, clipController.feedForYou);
