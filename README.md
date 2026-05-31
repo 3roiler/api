@@ -6,7 +6,7 @@ Streamclips, 3D-Printer-Tooling, Admin/Dashboard, OG-Renderer, Sitemap, RSS).
 
 Stack:
 
-- TypeScript -> Node.js 24 -> Express 5
+- TypeScript -> Node.js 26 -> Express 5
 - PostgreSQL 18 als persistenter Speicher (via `pg` + `node-pg-migrate`)
 - Redis 8 als Cache (u. a. Metrics-Proxy, OAuth-State)
 - Saubere Layer (Routes -> Controller -> Service)
@@ -36,7 +36,7 @@ src/
 └── models/             # Geteilte TypeScript-Typen
 
 migrations/             # node-pg-migrate Files (JS, timestamped)
-.devcontainer/          # VS Code Dev Container (Node 24 + Docker-in-Docker)
+.devcontainer/          # VS Code Dev Container (Node 26 + Docker-in-Docker)
 .github/workflows/      # CI/CD (Docker-Build)
 Dockerfile              # Multi-Stage Build (builder -> runner, non-root)
 docker-compose.yml      # postgres + redis + pgadmin (dev profile) + api
@@ -75,7 +75,7 @@ git --version
 ### Variante A — Dev Container (empfohlen)
 
 Repo öffnen, **Reopen in Container** wählen. Der Container basiert auf
-`mcr.microsoft.com/devcontainers/typescript-node:24` mit Docker-in-Docker;
+`mcr.microsoft.com/devcontainers/typescript-node:26` mit Docker-in-Docker;
 `npm install` läuft automatisch als `postStartCommand`.
 
 ### Variante B — lokal mit Docker Compose

@@ -100,7 +100,7 @@ status; non-AppError exceptions log and return 500 `API_ERROR`.
 - Migrations are plain JS in `./migrations/`, prefixed with a millisecond
   timestamp + sequence number (e.g. `1778200000000_039_comment_restore_audit.js`).
   Create new ones with `make migrate-create name=...` so the prefix is fresh.
-- 15 migrations currently in tree; latest is `_039_comment_restore_audit`.
+- 16 migrations currently in tree; latest is `_040_clip_slugs`.
 - `pg` Pool is the single connection point (`services/persistence.ts`,
   exported as `database`). Services run plain SQL — no ORM, no query builder.
 - Transactions use the `withTx` pattern: `connect()` -> `BEGIN` -> work ->
